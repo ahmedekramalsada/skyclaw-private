@@ -1,0 +1,77 @@
+# SkyClaw Default Configuration
+# Cloud-native Rust AI agent runtime
+
+[skyclaw]
+mode = "auto"  # "cloud" | "local" | "auto"
+tenant_isolation = false
+
+[gateway]
+host = "127.0.0.1"
+port = 8080
+tls = false
+
+[provider]
+# name = "anthropic"
+# api_key = "${ANTHROPIC_API_KEY}"
+# model = "claude-sonnet-4-20250514"
+
+[memory]
+backend = "sqlite"
+# path = "~/.skyclaw/memory.db"
+
+[memory.search]
+vector_weight = 0.7
+keyword_weight = 0.3
+
+[vault]
+backend = "local-chacha20"
+# key_file = "~/.skyclaw/vault.key"
+
+[filestore]
+backend = "local"
+# path = "~/.skyclaw/files"
+
+[security]
+sandbox = "mandatory"
+file_scanning = true
+skill_signing = "required"
+audit_log = true
+
+[heartbeat]
+interval = "30m"
+checklist = "HEARTBEAT.md"
+
+[cron]
+storage = "sqlite"
+
+[tools]
+shell = true
+browser = true
+file = true
+git = true
+cron = true
+http = true
+
+[observability]
+log_level = "info"
+otel_enabled = false
+
+# Channel examples (uncomment and configure):
+#
+# [channel.telegram]
+# enabled = true
+# token = "${TELEGRAM_BOT_TOKEN}"
+# allowlist = []
+# file_transfer = true
+#
+# [channel.discord]
+# enabled = true
+# token = "${DISCORD_BOT_TOKEN}"
+# allowlist = []
+# file_transfer = true
+#
+# [channel.slack]
+# enabled = true
+# token = "${SLACK_BOT_TOKEN}"
+# allowlist = []
+# file_transfer = true

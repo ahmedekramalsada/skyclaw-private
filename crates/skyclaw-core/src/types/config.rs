@@ -1,0 +1,308 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Top-level SkyClaw configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkyclawConfig {
+    #[serde(default)]
+    pub skyclaw: SkyclawSection,
+    #[serde(default)]
+    pub gateway: GatewayConfig,
+    #[serde(default)]
+    pub provider: ProviderConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
+    #[serde(default)]
+    pub vault: VaultConfig,
+    #[serde(default)]
+    pub filestore: FileStoreConfig,
+    #[serde(default)]
+    pub security: SecurityConfig,
+    #[serde(default)]
+    pub heartbeat: HeartbeatConfig,
+    #[serde(default)]
+    pub cron: CronConfig,
+    #[serde(default)]
+    pub channel: HashMap<String, ChannelConfig>,
+    #[serde(default)]
+    pub tools: ToolsConfig,
+    #[serde(default)]
+    pub tunnel: Option<TunnelConfig>,
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkyclawSection {
+    #[serde(default = "default_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub tenant_isolation: bool,
+}
+
+impl Default for SkyclawSection {
+    fn default() -> Self {
+        Self {
+            mode: "auto".to_string(),
+            tenant_isolation: false,
+        }
+    }
+}
+
+fn default_mode() -> String { "auto".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayConfig {
+    #[serde(default = "default_host")]
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub tls: bool,
+    pub tls_cert: Option<String>,
+    pub tls_key: Option<String>,
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 8080,
+            tls: false,
+            tls_cert: None,
+            tls_key: None,
+        }
+    }
+}
+
+fn default_host() -> String { "127.0.0.1".to_string() }
+fn default_port() -> u16 { 8080 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProviderConfig {
+    pub name: Option<String>,
+    pub api_key: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    #[serde(default = "default_memory_backend")]
+    pub backend: String,
+    pub path: Option<String>,
+    pub connection_string: Option<String>,
+    #[serde(default)]
+    pub search: SearchConfig,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            backend: "sqlite".to_string(),
+            path: None,
+            connection_string: None,
+            search: SearchConfig::default(),
+        }
+    }
+}
+
+fn default_memory_backend() -> String { "sqlite".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchConfig {
+    #[serde(default = "default_vector_weight")]
+    pub vector_weight: f32,
+    #[serde(default = "default_keyword_weight")]
+    pub keyword_weight: f32,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            vector_weight: 0.7,
+            keyword_weight: 0.3,
+        }
+    }
+}
+
+fn default_vector_weight() -> f32 { 0.7 }
+fn default_keyword_weight() -> f32 { 0.3 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultConfig {
+    #[serde(default = "default_vault_backend")]
+    pub backend: String,
+    pub key_file: Option<String>,
+}
+
+impl Default for VaultConfig {
+    fn default() -> Self {
+        Self {
+            backend: "local-chacha20".to_string(),
+            key_file: None,
+        }
+    }
+}
+
+fn default_vault_backend() -> String { "local-chacha20".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileStoreConfig {
+    #[serde(default = "default_filestore_backend")]
+    pub backend: String,
+    pub bucket: Option<String>,
+    pub region: Option<String>,
+    pub path: Option<String>,
+}
+
+impl Default for FileStoreConfig {
+    fn default() -> Self {
+        Self {
+            backend: "local".to_string(),
+            bucket: None,
+            region: None,
+            path: None,
+        }
+    }
+}
+
+fn default_filestore_backend() -> String { "local".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityConfig {
+    #[serde(default = "default_sandbox")]
+    pub sandbox: String,
+    #[serde(default = "default_true")]
+    pub file_scanning: bool,
+    #[serde(default = "default_skill_signing")]
+    pub skill_signing: String,
+    #[serde(default = "default_true")]
+    pub audit_log: bool,
+    #[serde(default)]
+    pub rate_limit: Option<RateLimitConfig>,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            sandbox: "mandatory".to_string(),
+            file_scanning: true,
+            skill_signing: "required".to_string(),
+            audit_log: true,
+            rate_limit: None,
+        }
+    }
+}
+
+fn default_sandbox() -> String { "mandatory".to_string() }
+fn default_skill_signing() -> String { "required".to_string() }
+fn default_true() -> bool { true }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    pub requests_per_minute: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatConfig {
+    #[serde(default = "default_heartbeat_interval")]
+    pub interval: String,
+    #[serde(default = "default_heartbeat_checklist")]
+    pub checklist: String,
+}
+
+impl Default for HeartbeatConfig {
+    fn default() -> Self {
+        Self {
+            interval: "30m".to_string(),
+            checklist: "HEARTBEAT.md".to_string(),
+        }
+    }
+}
+
+fn default_heartbeat_interval() -> String { "30m".to_string() }
+fn default_heartbeat_checklist() -> String { "HEARTBEAT.md".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronConfig {
+    #[serde(default = "default_cron_storage")]
+    pub storage: String,
+}
+
+impl Default for CronConfig {
+    fn default() -> Self {
+        Self { storage: "sqlite".to_string() }
+    }
+}
+
+fn default_cron_storage() -> String { "sqlite".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub token: Option<String>,
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    #[serde(default = "default_true")]
+    pub file_transfer: bool,
+    pub max_file_size: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolsConfig {
+    #[serde(default = "default_true")]
+    pub shell: bool,
+    #[serde(default = "default_true")]
+    pub browser: bool,
+    #[serde(default = "default_true")]
+    pub file: bool,
+    #[serde(default = "default_true")]
+    pub git: bool,
+    #[serde(default = "default_true")]
+    pub cron: bool,
+    #[serde(default = "default_true")]
+    pub http: bool,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            shell: true,
+            browser: true,
+            file: true,
+            git: true,
+            cron: true,
+            http: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelConfig {
+    pub provider: String,
+    pub token: Option<String>,
+    pub command: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ObservabilityConfig {
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
+    #[serde(default)]
+    pub otel_enabled: bool,
+    pub otel_endpoint: Option<String>,
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            log_level: "info".to_string(),
+            otel_enabled: false,
+            otel_endpoint: None,
+        }
+    }
+}
+
+fn default_log_level() -> String { "info".to_string() }

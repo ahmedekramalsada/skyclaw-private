@@ -1,0 +1,14 @@
+[package]
+name = "skyclaw-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Agent runtime for SkyClaw"
+
+[dependencies]
+skyclaw-core.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
