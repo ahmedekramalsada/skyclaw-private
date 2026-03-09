@@ -25,6 +25,36 @@ SkyClaw is an autonomous AI agent that lives on your server and talks to you thr
 
 No web dashboards. No config files to edit. Deploy, paste your API key in Telegram, and go.
 
+## AGENTIC CORE
+
+SkyClaw's intelligence layer — 20 modules driving an autonomous execution cycle:
+
+```
+ORDER ─→ THINK ─→ ACTION ─→ VERIFY ─┐
+                                      │
+          ┌───────────────────────────┘
+          │
+          ├─ DONE? ──→ yes ──→ LEARN ──→ END
+          │
+          └─ no ──→ THINK ─→ ACTION ─→ VERIFY ─→ ...
+```
+
+- **ORDER**: Inbound message decomposed into task graph
+- **THINK**: Context assembly — system prompt, tool defs, memory, knowledge, past learnings (5% budget)
+- **ACTION**: Tool execution — shell, browser, file ops, web fetch, git
+- **VERIFY**: Self-correction engine checks output, triggers strategy rotation on repeated failures
+- **DONE**: Measurable completion criteria, not assertions
+- **LEARN**: `extract_learnings()` analyzes tools used, failures, outcomes → stores `TaskLearning` in memory → injected into future THINK steps
+
+| Category | Modules |
+|----------|---------|
+| **Resilience** | Circuit breaker, channel reconnection, graceful shutdown, streaming responses |
+| **Intelligence** | Task decomposition, self-correction, DONE criteria, cross-task learning |
+| **Self-Healing** | Watchdog, state recovery, health-aware heartbeat, memory failover |
+| **Efficiency** | Output compression, system prompt optimization, tiered model routing, history pruning |
+| **Autonomy** | Parallel tool execution, agent-to-agent delegation, proactive task initiation, adaptive system prompt |
+| **Multimodal** | Vision / image understanding (JPEG, PNG, GIF, WebP) |
+
 ## Key Metrics
 
 | Metric | Value |
@@ -128,36 +158,6 @@ Paste any of these API keys in Telegram — SkyClaw detects the provider automat
 | **Messaging** | Send real-time updates during multi-step tasks |
 | **File transfer** | Send/receive files through messaging channels |
 | **Memory manage** | Persistent knowledge CRUD — remember, recall, forget, update, list |
-
-## AGENTIC CORE
-
-SkyClaw's intelligence layer — 20 modules driving an autonomous execution cycle:
-
-```
-ORDER ─→ THINK ─→ ACTION ─→ VERIFY ─┐
-                                      │
-          ┌───────────────────────────┘
-          │
-          ├─ DONE? ──→ yes ──→ LEARN ──→ END
-          │
-          └─ no ──→ THINK ─→ ACTION ─→ VERIFY ─→ ...
-```
-
-- **ORDER**: Inbound message decomposed into task graph
-- **THINK**: Context assembly — system prompt, tool defs, memory, knowledge, past learnings (5% budget)
-- **ACTION**: Tool execution — shell, browser, file ops, web fetch, git
-- **VERIFY**: Self-correction engine checks output, triggers strategy rotation on repeated failures
-- **DONE**: Measurable completion criteria, not assertions
-- **LEARN**: `extract_learnings()` analyzes tools used, failures, outcomes → stores `TaskLearning` in memory → injected into future THINK steps
-
-| Category | Modules |
-|----------|---------|
-| **Resilience** | Circuit breaker, channel reconnection, graceful shutdown, streaming responses |
-| **Intelligence** | Task decomposition, self-correction, DONE criteria, cross-task learning |
-| **Self-Healing** | Watchdog, state recovery, health-aware heartbeat, memory failover |
-| **Efficiency** | Output compression, system prompt optimization, tiered model routing, history pruning |
-| **Autonomy** | Parallel tool execution, agent-to-agent delegation, proactive task initiation, adaptive system prompt |
-| **Multimodal** | Vision / image understanding (JPEG, PNG, GIF, WebP) |
 
 ## Vision Support
 
