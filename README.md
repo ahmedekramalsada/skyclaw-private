@@ -10,7 +10,7 @@
   <a href="https://github.com/nagisanzenin/skyclaw/stargazers"><img src="https://img.shields.io/github/stars/nagisanzenin/skyclaw?style=flat&color=gold&logo=github" alt="GitHub Stars"></a>
   <a href="https://discord.gg/3ux2c5xz"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
-  <img src="https://img.shields.io/badge/version-1.5.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.5.1-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/tests-1095-green.svg" alt="1095 tests">
   <img src="https://img.shields.io/badge/providers-6-red.svg" alt="6 providers">
 </p>
@@ -48,7 +48,7 @@ ORDER ─→ THINK ─→ ACTION ─→ VERIFY ─┐
 
 | Category | Modules |
 |----------|---------|
-| **Resilience** | Circuit breaker, channel reconnection, graceful shutdown, streaming responses |
+| **Resilience** | Circuit breaker, per-message panic recovery, dead worker respawn, channel reconnection, graceful shutdown, conversation persistence |
 | **Intelligence** | Task decomposition, self-correction, DONE criteria, cross-task learning |
 | **Self-Healing** | Watchdog, state recovery, health-aware heartbeat, memory failover |
 | **Efficiency** | Output compression, system prompt optimization, tiered model routing, history pruning |
@@ -73,9 +73,9 @@ ORDER ─→ THINK ─→ ACTION ─→ VERIFY ─┐
 | **Memory backends** | 3 (SQLite, Markdown, failover) |
 | **File storage** | 2 (local, S3/R2) |
 | **Observability** | OpenTelemetry, 6 predefined metrics |
-| **Security features** | Auto-whitelist, vault encryption, path traversal protection, force-push block, credential message deletion, 4-layer key validation, OTK secure key setup, secret output filter |
+| **Security features** | Auto-whitelist, vault encryption, path traversal protection, force-push block, credential message deletion, 4-layer key validation, OTK secure key setup, secret output filter, UTF-8 safe string handling |
 | **Vision support** | JPEG, PNG, GIF, WebP (Anthropic + OpenAI formats) |
-| **Release profile** | `opt-level=z`, LTO, 1 codegen unit, stripped, `panic=abort` |
+| **Release profile** | `opt-level=z`, LTO, 1 codegen unit, stripped, `panic=unwind` |
 | **Minimum Rust version** | 1.82 (Edition 2021) |
 | **Binary size** | 7.1 MB (release, stripped, LTO) |
 | **Memory (idle)** | 14 MB RSS |
@@ -246,6 +246,8 @@ cargo build --release                                      # Release build
 ## Release Timeline
 
 ```
+2026-03-10  v1.5.1  ●━━━ Crash resilience — 4-layer panic recovery, UTF-8 safety (6 fixes), conversation persistence, budget default fix, per-turn usage tracking
+                    │
 2026-03-09  v1.5.0  ●━━━ OTK secure key setup — AES-256-GCM encrypted onboarding, key_manage tool, secret output filter, SetupLinkGenerator trait, 1095 tests
                     │
 2026-03-09  v1.4.0  ●━━━ Persistent memory & budget — memory_manage tool (CRUD), knowledge auto-injection, budget tracking, CLI chat, 1061 tests
