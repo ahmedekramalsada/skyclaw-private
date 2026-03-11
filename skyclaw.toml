@@ -7,10 +7,13 @@ port = 8080
 tls = false
 
 [provider]
-name = "anthropic"
-api_key = "sk-ant-ollama-local-test-key-123456"
-base_url = "http://172.22.112.1:11434"
-model = "claude-sonnet-4-6"
+name = "openrouter"
+api_key = "${OPENROUTER_API_KEY}"
+model = "anthropic/claude-3.5-sonnet"
+# To use Google Gemini instead, change to:
+# name = "gemini"
+# api_key = "${GOOGLE_API_KEY}"
+# model = "gemini-1.5-pro"
 
 [agent]
 # max_spend_usd = 0.0  # 0.0 = unlimited (default). Set a value to cap per-process spend.
