@@ -11,7 +11,7 @@
   <a href="https://discord.gg/3ux2c5xz"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
   <img src="https://img.shields.io/badge/version-2.3.0-blue.svg" alt="Version">
-  <img src="https://img.shields.io/badge/tests-1297-green.svg" alt="1297 tests">
+  <img src="https://img.shields.io/badge/tests-1307-green.svg" alt="1307 tests">
   <img src="https://img.shields.io/badge/providers-8-red.svg" alt="8 providers">
 </p>
 
@@ -22,7 +22,7 @@ Deploys once, stays up forever. Learns from every task, remembers across session
 
 **v2.3: Codex OAuth** — use your ChatGPT Plus/Pro subscription as an AI provider. OAuth PKCE login, Responses API streaming, auto-refresh tokens.
 
-58K lines | 1,297 tests | zero warnings | zero panic paths | 15 MB idle RAM | 31ms cold start | [Benchmark report](docs/benchmarks/BENCHMARK_REPORT.md)
+58K lines | 1,307 tests | zero warnings | zero panic paths | 15 MB idle RAM | 31ms cold start | [Benchmark report](docs/benchmarks/BENCHMARK_REPORT.md)
 
 ## What It Does
 
@@ -92,7 +92,7 @@ ORDER ─→ THINK ─→ ACTION ─→ VERIFY ─┐
 | Metric | Value |
 |--------|-------|
 | **Lines of Rust** | 58,381 across 124 source files |
-| **Tests** | 1,297 passing, 0 failures |
+| **Tests** | 1,307 passing, 0 failures |
 | **Clippy warnings** | 0 (CI gate: `-D warnings`) |
 | **Workspace crates** | 15 + 1 binary |
 | **Implemented features** | 52 across 10 phases |
@@ -445,7 +445,7 @@ Handles dirty working trees automatically (stash → pull → build → pop). If
 ```bash
 cargo check --workspace                                    # Quick compilation check
 cargo build --workspace                                    # Debug build
-cargo test --workspace                                     # Run all 1297 tests
+cargo test --workspace                                     # Run all 1307 tests
 cargo clippy --workspace --all-targets --all-features -- -D warnings  # Lint (0 warnings)
 cargo fmt --all                                            # Format
 cargo build --release                                      # Release build

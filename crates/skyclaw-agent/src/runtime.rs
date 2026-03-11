@@ -12,6 +12,7 @@ use skyclaw_core::types::message::{
     ChatMessage, ContentPart, InboundMessage, MessageContent, OutboundMessage, ParseMode, Role,
     TurnUsage,
 };
+use skyclaw_core::types::model_registry;
 use skyclaw_core::types::session::SessionContext;
 use skyclaw_core::{Memory, Provider, Tool};
 use tracing::{debug, info, warn};
@@ -99,6 +100,10 @@ impl AgentRuntime {
     }
 
     /// Create a new AgentRuntime with custom context limits.
+    ///
+    /// The `max_context_tokens` is automatically capped to the model's actual
+    /// context window (minus output headroom) using the model registry. This
+    /// prevents overflow for small-context models like Qwen 2.5 7B (32K).
     #[allow(clippy::too_many_arguments)]
     pub fn with_limits(
         provider: Arc<dyn Provider>,
@@ -113,6 +118,25 @@ impl AgentRuntime {
         max_spend_usd: f64,
     ) -> Self {
         let model_pricing = budget::get_pricing(&model);
+
+        // Cap max_context_tokens to the model's actual context window minus
+        // output token headroom. This prevents trying to fill 30K tokens of
+        // input into a model that only has 32K total (e.g. qwen-2.5-7b).
+        let (model_ctx_window, model_max_output) = model_registry::model_limits(&model);
+        let model_input_budget = model_ctx_window.saturating_sub(model_max_output);
+        let effective_context = max_context_tokens.min(model_input_budget);
+
+        if effective_context < max_context_tokens {
+            info!(
+                model = %model,
+                configured = max_context_tokens,
+                effective = effective_context,
+                model_context_window = model_ctx_window,
+                model_max_output = model_max_output,
+                "Adjusted max_context_tokens to fit model's context window"
+            );
+        }
+
         Self {
             provider,
             memory,
@@ -120,7 +144,7 @@ impl AgentRuntime {
             model,
             system_prompt,
             max_turns,
-            max_context_tokens,
+            max_context_tokens: effective_context,
             max_tool_rounds,
             max_task_duration: Duration::from_secs(max_task_duration_secs),
             circuit_breaker: CircuitBreaker::default(),

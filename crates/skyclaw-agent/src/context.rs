@@ -19,6 +19,7 @@ use std::sync::Arc;
 use skyclaw_core::types::message::{
     ChatMessage, CompletionRequest, ContentPart, MessageContent, Role, ToolDefinition,
 };
+use skyclaw_core::types::model_registry;
 use skyclaw_core::types::optimization::PromptTier;
 use skyclaw_core::types::session::SessionContext;
 use skyclaw_core::MemoryEntryType;
@@ -409,11 +410,14 @@ pub async fn build_context(
     // errors: "unexpected tool_use_id found in tool_result blocks".
     remove_orphaned_tool_results(&mut messages);
 
+    // Use the model's actual max output token limit instead of hardcoding 4096
+    let (_, model_max_output) = model_registry::model_limits(model);
+
     CompletionRequest {
         model: model.to_string(),
         messages,
         tools: tool_defs,
-        max_tokens: Some(4096),
+        max_tokens: Some(model_max_output as u32),
         temperature: Some(0.7),
         system,
     }
