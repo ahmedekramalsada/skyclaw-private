@@ -8,7 +8,8 @@ tls = false
 
 [provider]
 name = "anthropic"
-api_key = "${ANTHROPIC_API_KEY}"
+api_key = "sk-ant-ollama-local-test-key-123456"
+base_url = "http://172.22.112.1:11434"
 model = "claude-sonnet-4-6"
 
 [agent]
@@ -55,7 +56,7 @@ log_level = "info"
 otel_enabled = false
 
 [channel.telegram]
-enabled = true
+enabled = false
 token = "${TELEGRAM_BOT_TOKEN}"
 allowlist = []
 file_transfer = true
