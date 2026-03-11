@@ -70,9 +70,9 @@ ok "git found"
 header "STEP 2 — Building release binary"
 # ─────────────────────────────────────────────────────────────────────────────
 
-info "Building skyclaw in release mode (this takes 2-5 minutes first time)..."
+info "Building skyclaw in release mode (limiting to 1 job to save memory)..."
 cd "$REPO_DIR"
-cargo build --release 2>&1 | tail -5
+cargo build --release -j 1 2>&1 | tail -5
 
 if [[ ! -f "$REPO_DIR/target/release/skyclaw" ]]; then
   err "Build failed — binary not found at target/release/skyclaw"
