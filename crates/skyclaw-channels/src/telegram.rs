@@ -265,7 +265,7 @@ impl Channel for TelegramChannel {
                             let tx2 = tx2.clone();
                             async move {
                                 // Answer the callback so Telegram removes the loading spinner
-                                let _ = bot.answer_callback_query(&q.id).await;
+                                let _ = bot.answer_callback_query(q.id.clone()).await;
 
                                 let user_id = q.from.id.0.to_string();
                                 let username = q.from.username.clone();
@@ -297,7 +297,7 @@ impl Channel for TelegramChannel {
 
                                 // Forward the button tap as a regular inbound message
                                 let inbound = InboundMessage {
-                                    id: q.id.clone(),
+                                    id: q.id.to_string(),
                                     channel: "telegram".to_string(),
                                     chat_id: chat_id_str,
                                     user_id,
