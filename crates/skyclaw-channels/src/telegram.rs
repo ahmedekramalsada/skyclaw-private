@@ -237,17 +237,20 @@ impl Channel for TelegramChannel {
                     break;
                 }
 
-                // Rebuild handler each iteration (dispatcher takes ownership)
+                // Rebuild handler each iteration (dispatcher takes ownership).
+                // Clone tx/allowlist/admin per-iteration so the move closures
+                // capture clones, keeping the originals alive for the next loop.
+                let tx_msg = tx.clone();
                 let tx_for_queries = tx.clone();
-                let allowlist = allowlist.clone();
-                let admin = admin.clone();
+                let allowlist_msg = allowlist.clone();
+                let admin_msg = admin.clone();
                 let handler = dptree::entry()
                     // ── Normal text/file messages ────────────────────────
                     .branch(Update::filter_message().endpoint(
                         move |bot: Bot, msg: teloxide::types::Message| {
-                            let tx = tx.clone();
-                            let allowlist = allowlist.clone();
-                            let admin = admin.clone();
+                            let tx = tx_msg.clone();
+                            let allowlist = allowlist_msg.clone();
+                            let admin = admin_msg.clone();
                             async move {
                                 if let Err(e) =
                                     handle_telegram_message(&bot, msg, &tx, allowlist, admin).await
