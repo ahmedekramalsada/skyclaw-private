@@ -1,8 +1,9 @@
-# SkyClaw Default Configuration
-# Cloud-native Rust AI agent runtime — Telegram-native
+# SkyClaw Configuration — batabeto DevOps Agent
+# OpenRouter provider | Telegram channel | Full host + SSH control
+# ----------------------------------------------------------------
 
 [skyclaw]
-mode = "auto"  # "cloud" | "local" | "auto"
+mode = "auto"
 tenant_isolation = false
 
 [gateway]
@@ -10,13 +11,19 @@ host = "127.0.0.1"
 port = 8080
 tls = false
 
-# Provider is auto-configured via Telegram onboarding.
-# Or set manually here to skip onboarding:
-[provider]
-# name = "anthropic"
-# api_key = "your-api-key-here"
-# model = "claude-sonnet-4-6"
+# ── Provider ────────────────────────────────────────────────────
+# OpenRouter is configured via Telegram onboarding (paste sk-or-v1-... key).
+# To skip onboarding and hardcode it here instead, uncomment below:
+# [provider]
+# name = "openrouter"
+# api_key = "${OPENROUTER_API_KEY}"
+# model = "anthropic/claude-sonnet-4-6"
 
+[provider]
+name = "openrouter"
+model = "anthropic/claude-sonnet-4-6"
+
+# ── Memory ──────────────────────────────────────────────────────
 [memory]
 backend = "sqlite"
 
@@ -24,26 +31,43 @@ backend = "sqlite"
 vector_weight = 0.7
 keyword_weight = 0.3
 
+# ── Vault ───────────────────────────────────────────────────────
 [vault]
 backend = "local-chacha20"
 
+# ── File storage ─────────────────────────────────────────────────
 [filestore]
 backend = "local"
 
+# ── Security ─────────────────────────────────────────────────────
 [security]
 sandbox = "mandatory"
 file_scanning = true
 skill_signing = "required"
 audit_log = true
 
+# ── Heartbeat — every 15 min, alerts only on failure ─────────────
 [heartbeat]
-enabled = false
-interval = "30m"
+enabled = true
+interval = "15m"
 checklist = "HEARTBEAT.md"
+# report_to is set at runtime from your Telegram chat ID.
+# Hardcode it here once you know it: report_to = "123456789"
 
+# ── Cron ─────────────────────────────────────────────────────────
 [cron]
 storage = "sqlite"
 
+# ── Agent limits — tuned for long-running DevOps tasks ───────────
+[agent]
+max_turns = 200
+max_tool_rounds = 200
+max_context_tokens = 60000
+max_task_duration_secs = 3600
+max_spend_usd = 0.0
+v2_optimizations = true
+
+# ── Tools — all enabled ──────────────────────────────────────────
 [tools]
 shell = true
 browser = true
@@ -52,11 +76,12 @@ git = true
 cron = true
 http = true
 
+# ── Observability ─────────────────────────────────────────────────
 [observability]
 log_level = "info"
 otel_enabled = false
 
-# Telegram channel — set your bot token here or via TELEGRAM_BOT_TOKEN env var
+# ── Telegram ──────────────────────────────────────────────────────
 [channel.telegram]
 enabled = true
 token = "${TELEGRAM_BOT_TOKEN}"

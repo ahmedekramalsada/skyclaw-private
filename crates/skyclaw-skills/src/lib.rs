@@ -248,7 +248,7 @@ mod tests {
     // ---------------------------------------------------------------
     // load_skills tests
     // ---------------------------------------------------------------
-
+ 
     #[tokio::test]
     async fn test_load_skills_from_workspace_dir() {
         let tmp = tempdir().unwrap();

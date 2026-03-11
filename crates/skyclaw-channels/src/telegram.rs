@@ -17,7 +17,49 @@ use skyclaw_core::{Channel, FileTransfer};
 
 use teloxide::net::Download;
 use teloxide::prelude::*;
-use teloxide::types::{InputFile, MediaKind, MessageKind};
+use teloxide::types::{
+    InputFile, InlineKeyboardButton, InlineKeyboardMarkup, MediaKind, MessageKind,
+};
+
+/// Parse a `BUTTONS: A | B | C` line from agent output and build an inline keyboard.
+/// Returns (cleaned_text, Option<keyboard>) where cleaned_text has the BUTTONS line removed.
+fn extract_inline_keyboard(text: &str) -> (String, Option<InlineKeyboardMarkup>) {
+    let mut keyboard_line: Option<String> = None;
+    let mut clean_lines: Vec<&str> = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("BUTTONS:") {
+            keyboard_line = Some(trimmed["BUTTONS:".len()..].to_string());
+        } else {
+            clean_lines.push(line);
+        }
+    }
+
+    let clean_text = clean_lines.join("\n").trim_end().to_string();
+
+    let keyboard = keyboard_line.map(|btns| {
+        let buttons: Vec<InlineKeyboardButton> = btns
+            .split('|')
+            .map(|b| b.trim().to_string())
+            .filter(|b| !b.is_empty())
+            .map(|label| {
+                // Use label as both display text and callback data
+                InlineKeyboardButton::callback(label.clone(), label)
+            })
+            .collect();
+
+        // Pack into rows of max 3 buttons each
+        let rows: Vec<Vec<InlineKeyboardButton>> = buttons
+            .chunks(3)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+
+        InlineKeyboardMarkup::new(rows)
+    });
+
+    (clean_text, keyboard)
+}
 
 /// Maximum file size the Telegram Bot API supports for uploads (50 MB).
 const TELEGRAM_UPLOAD_LIMIT: usize = 50 * 1024 * 1024;
@@ -199,21 +241,78 @@ impl Channel for TelegramChannel {
                 let tx = tx.clone();
                 let allowlist = allowlist.clone();
                 let admin = admin.clone();
-                let handler = Update::filter_message().endpoint(
-                    move |bot: Bot, msg: teloxide::types::Message| {
-                        let tx = tx.clone();
-                        let allowlist = allowlist.clone();
-                        let admin = admin.clone();
-                        async move {
-                            if let Err(e) =
-                                handle_telegram_message(&bot, msg, &tx, allowlist, admin).await
-                            {
-                                tracing::error!(error = %e, "Failed to handle Telegram message");
+                let handler = dptree::entry()
+                    // ── Normal text/file messages ────────────────────────
+                    .branch(Update::filter_message().endpoint(
+                        move |bot: Bot, msg: teloxide::types::Message| {
+                            let tx = tx.clone();
+                            let allowlist = allowlist.clone();
+                            let admin = admin.clone();
+                            async move {
+                                if let Err(e) =
+                                    handle_telegram_message(&bot, msg, &tx, allowlist, admin).await
+                                {
+                                    tracing::error!(error = %e, "Failed to handle Telegram message");
+                                }
+                                respond(())
                             }
-                            respond(())
+                        },
+                    ))
+                    // ── Inline button taps — forward as regular message ──
+                    .branch(Update::filter_callback_query().endpoint({
+                        let tx2 = tx.clone();
+                        move |bot: Bot, q: teloxide::types::CallbackQuery| {
+                            let tx2 = tx2.clone();
+                            async move {
+                                // Answer the callback so Telegram removes the loading spinner
+                                let _ = bot.answer_callback_query(&q.id).await;
+
+                                let user_id = q.from.id.0.to_string();
+                                let username = q.from.username.clone();
+                                let button_text = q.data.unwrap_or_default();
+
+                                // Determine chat_id from the original message
+                                let chat_id_str = q
+                                    .message
+                                    .as_ref()
+                                    .map(|m| m.chat().id.0.to_string())
+                                    .unwrap_or_default();
+
+                                if chat_id_str.is_empty() || button_text.is_empty() {
+                                    return respond(());
+                                }
+
+                                // If owner tapped "✏️ Other", prompt them to type their answer
+                                if button_text.contains("Other") || button_text == "✏️ Other" {
+                                    if let Ok(cid) = chat_id_str.parse::<i64>() {
+                                        let _ = bot
+                                            .send_message(
+                                                teloxide::types::ChatId(cid),
+                                                "✏️ Type your answer:",
+                                            )
+                                            .await;
+                                    }
+                                    return respond(());
+                                }
+
+                                // Forward the button tap as a regular inbound message
+                                let inbound = InboundMessage {
+                                    id: q.id.clone(),
+                                    channel: "telegram".to_string(),
+                                    chat_id: chat_id_str,
+                                    user_id,
+                                    username,
+                                    text: Some(button_text),
+                                    attachments: vec![],
+                                    reply_to: None,
+                                    timestamp: chrono::Utc::now(),
+                                };
+
+                                let _ = tx2.send(inbound).await;
+                                respond(())
+                            }
                         }
-                    },
-                );
+                    }));
 
                 let mut dispatcher = Dispatcher::builder(bot.clone(), handler).build();
 
@@ -260,7 +359,11 @@ impl Channel for TelegramChannel {
             .map(ChatId)
             .map_err(|_| SkyclawError::Channel(format!("Invalid chat_id: {}", msg.chat_id)))?;
 
-        let mut request = bot.send_message(chat_id, &msg.text);
+        // Detect BUTTONS: line and extract inline keyboard if present
+        let (clean_text, keyboard_opt) = extract_inline_keyboard(&msg.text);
+        let send_text = if clean_text.is_empty() { &msg.text } else { &clean_text };
+
+        let mut request = bot.send_message(chat_id, send_text);
 
         if let Some(ref mode) = msg.parse_mode {
             request = match mode {
@@ -268,6 +371,11 @@ impl Channel for TelegramChannel {
                 ParseMode::Html => request.parse_mode(teloxide::types::ParseMode::Html),
                 ParseMode::Plain => request,
             };
+        }
+
+        // Attach inline keyboard if the agent included a BUTTONS: line
+        if let Some(keyboard) = keyboard_opt {
+            request = request.reply_markup(keyboard);
         }
 
         request

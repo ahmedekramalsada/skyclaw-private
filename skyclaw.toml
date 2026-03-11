@@ -1,65 +1,94 @@
-[skyclaw]
-mode = "local"
+# batabeto — Personal DevOps AI Agent
+# Root runtime config. This file lives next to the binary or at ~/.skyclaw/skyclaw.toml
+# ─────────────────────────────────────────────────────────────────────────────
 
+[skyclaw]
+mode = "auto"
+tenant_isolation = false
+
+# ── Gateway ───────────────────────────────────────────────────────────────────
 [gateway]
 host = "127.0.0.1"
 port = 8080
 tls = false
 
+# ── Provider ──────────────────────────────────────────────────────────────────
+# OpenRouter — paste your sk-or-v1-... key via Telegram on first run.
+# Or hardcode here:
+# api_key = "sk-or-v1-YOUR_KEY_HERE"
 [provider]
 name = "openrouter"
-api_key = "${OPENROUTER_API_KEY}"
-model = "${SKYCLAW_MODEL}"
-# To use Google Gemini instead, change to:
-# name = "gemini"
-# api_key = "${GOOGLE_API_KEY}"
-# model = "${SKYCLAW_MODEL}"
+model = "anthropic/claude-sonnet-4-6"
 
-[agent]
-# max_spend_usd = 0.0  # 0.0 = unlimited (default). Set a value to cap per-process spend.
-
+# ── Memory ────────────────────────────────────────────────────────────────────
 [memory]
 backend = "sqlite"
+# SQLite DB lives at ~/.skyclaw/memory.db (created automatically)
 
 [memory.search]
 vector_weight = 0.7
 keyword_weight = 0.3
 
+# ── Vault ─────────────────────────────────────────────────────────────────────
 [vault]
 backend = "local-chacha20"
+# Encrypted secrets live at ~/.skyclaw/vault/ (created automatically)
 
+# ── File storage ──────────────────────────────────────────────────────────────
 [filestore]
 backend = "local"
+# Files land in ~/.skyclaw/workspace/ (created automatically)
 
+# ── Security ──────────────────────────────────────────────────────────────────
 [security]
 sandbox = "mandatory"
 file_scanning = true
 skill_signing = "required"
 audit_log = true
 
+# ── Heartbeat — every 15 min, DevOps health check ────────────────────────────
+# After first run, send your Telegram chat ID to batabeto and say:
+#   "Remember my chat ID is 123456789"
+# Then hardcode it here: report_to = "123456789"
 [heartbeat]
-enabled = false
-interval = "30m"
+enabled = true
+interval = "15m"
 checklist = "HEARTBEAT.md"
-# report_to = ""  # Set to your Telegram chat ID for heartbeat reports
 
+# ── Cron ──────────────────────────────────────────────────────────────────────
 [cron]
 storage = "sqlite"
 
-[tools]
-shell = true
-browser = true
-file = true
-git = true
-cron = true
-http = true
+# ── Agent — tuned for DevOps workloads ───────────────────────────────────────
+[agent]
+max_turns = 200
+max_tool_rounds = 200
+max_context_tokens = 60000
+max_task_duration_secs = 3600  # 1 hour max — enough for any deployment
+max_spend_usd = 0.0            # unlimited — manage budget on OpenRouter dashboard
+v2_optimizations = true        # smart complexity classification
 
+# ── Tools ─────────────────────────────────────────────────────────────────────
+[tools]
+shell   = true   # kubectl, helm, ansible-playbook, terraform, ssh, docker
+browser = true   # headless Chrome — web dashboards, docs
+file    = true   # read/write any file on host
+git     = true   # git clone, pull, push, commit
+cron    = true   # scheduled tasks
+http    = true   # HTTP requests to APIs
+
+# ── Observability ─────────────────────────────────────────────────────────────
 [observability]
 log_level = "info"
 otel_enabled = false
+# Enable OTEL if you run Grafana/Prometheus:
+# otel_enabled = true
+# otel_endpoint = "http://localhost:4317"
 
+# ── Telegram ──────────────────────────────────────────────────────────────────
+# Set TELEGRAM_BOT_TOKEN in /root/.skyclaw/.env or export it before starting.
 [channel.telegram]
 enabled = true
 token = "${TELEGRAM_BOT_TOKEN}"
-allowlist = []
-file_transfer = true
+allowlist = []       # empty = first user auto-whitelisted (you)
+file_transfer = true # send/receive files via Telegram
