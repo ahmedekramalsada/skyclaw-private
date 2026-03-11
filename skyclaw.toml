@@ -59,7 +59,7 @@ log_level = "info"
 otel_enabled = false
 
 [channel.telegram]
-enabled = false
+enabled = true
 token = "${TELEGRAM_BOT_TOKEN}"
 allowlist = []
 file_transfer = true
