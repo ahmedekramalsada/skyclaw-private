@@ -238,7 +238,7 @@ impl Channel for TelegramChannel {
                 }
 
                 // Rebuild handler each iteration (dispatcher takes ownership)
-                let tx = tx.clone();
+                let tx_for_queries = tx.clone();
                 let allowlist = allowlist.clone();
                 let admin = admin.clone();
                 let handler = dptree::entry()
@@ -260,7 +260,7 @@ impl Channel for TelegramChannel {
                     ))
                     // ── Inline button taps — forward as regular message ──
                     .branch(Update::filter_callback_query().endpoint({
-                        let tx2 = tx.clone();
+                        let tx2 = tx_for_queries.clone();
                         move |bot: Bot, q: teloxide::types::CallbackQuery| {
                             let tx2 = tx2.clone();
                             async move {
