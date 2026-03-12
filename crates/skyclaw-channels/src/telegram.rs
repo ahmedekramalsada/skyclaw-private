@@ -271,35 +271,35 @@ impl Channel for TelegramChannel {
                             let tx2       = tx_cb.clone();
                             let allowlist = allowlist_cb.clone();
                             async move {
-                                // Extract ALL fields from q immediately before any moves or awaits.
-                                // This avoids partial-move errors and keeps the types clean.
-                                let callback_id  = q.id.to_string();
-                                let user_id      = q.from.id.0.to_string();
-                                let username     = q.from.username.clone();
-                                let button_text  = q.data.unwrap_or_default();
-                                let chat_id_str  = q
+                                // ── Allowlist check (sync, no await) ──────────────
+                                // Evaluate as a bool and drop the guard BEFORE any .await.
+                                // RwLockReadGuard is !Send — holding it across .await
+                                // makes the future !Send, which tokio rejects.
+                                let user_id_str = q.from.id.0.to_string();
+                                let rejected = {
+                                    let list = allowlist.read().unwrap_or_else(|p| p.into_inner());
+                                    !list.is_empty() && !list.iter().any(|a| *a == user_id_str)
+                                }; // guard dropped here — safe to .await below
+
+                                if rejected {
+                                    tracing::warn!(user_id = %user_id_str, "Rejected button tap from unlisted user");
+                                    let _ = bot.answer_callback_query(&q.id).await;
+                                    return respond(());
+                                }
+
+                                // Acknowledge — removes the loading spinner in Telegram.
+                                let _ = bot.answer_callback_query(&q.id).await;
+
+                                // Extract remaining fields AFTER the answer call.
+                                // q.data is Option<String>; clone it so q is not partially moved.
+                                let button_text = q.data.clone().unwrap_or_default();
+                                let chat_id_str = q
                                     .message
                                     .as_ref()
                                     .map(|m| m.chat().id.0.to_string())
                                     .unwrap_or_default();
-                                // q is fully consumed / no longer needed after this point
-
-                                // ── Allowlist check (sync, no await) ──────────────
-                                // Compute the result as a bool, drop the guard immediately
-                                // before any .await — RwLockReadGuard is !Send.
-                                let rejected = {
-                                    let list = allowlist.read().unwrap_or_else(|p| p.into_inner());
-                                    !list.is_empty() && !list.iter().any(|a| *a == user_id)
-                                }; // guard dropped here
-
-                                if rejected {
-                                    tracing::warn!(user_id = %user_id, "Rejected button tap from unlisted user");
-                                    let _ = bot.answer_callback_query(&callback_id).await;
-                                    return respond(());
-                                }
-
-                                // Acknowledge the tap — removes the loading spinner in Telegram.
-                                let _ = bot.answer_callback_query(&callback_id).await;
+                                let callback_id_str = q.id.to_string();
+                                let username        = q.from.username.clone();
 
                                 if chat_id_str.is_empty() || button_text.is_empty() {
                                     return respond(());
@@ -321,10 +321,10 @@ impl Channel for TelegramChannel {
                                 // Forward as a regular inbound message so the agent loop
                                 // processes the button tap exactly like typed text.
                                 let inbound = InboundMessage {
-                                    id:          callback_id,
+                                    id:          callback_id_str,
                                     channel:     "telegram".to_string(),
                                     chat_id:     chat_id_str,
-                                    user_id,
+                                    user_id:     user_id_str,
                                     username,
                                     text:        Some(button_text),
                                     attachments: vec![],
