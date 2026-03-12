@@ -238,19 +238,23 @@ impl Channel for TelegramChannel {
                 }
 
                 // Rebuild handler each iteration (dispatcher takes ownership).
-                // Clone tx/allowlist/admin per-iteration so the move closures
-                // capture clones, keeping the originals alive for the next loop.
-                let tx_msg = tx.clone();
-                let tx_for_queries = tx.clone();
+                // IMPORTANT: clone tx separately for each branch BEFORE building the handler.
+                // Both branches are move closures — if we clone inside the chain, the first
+                // move closure consumes tx and the second branch fails to compile.
+                let tx_msg = tx.clone();  // for the text/file message branch
+                let tx_cb  = tx.clone();  // for the callback query (button tap) branch
                 let allowlist_msg = allowlist.clone();
-                let admin_msg = admin.clone();
+                let admin_msg     = admin.clone();
+                // Callback handler also needs the allowlist to reject unauthorized button taps
+                let allowlist_cb = allowlist.clone();
+
                 let handler = dptree::entry()
                     // ── Normal text/file messages ────────────────────────
                     .branch(Update::filter_message().endpoint(
                         move |bot: Bot, msg: teloxide::types::Message| {
-                            let tx = tx_msg.clone();
+                            let tx        = tx_msg.clone();
                             let allowlist = allowlist_msg.clone();
-                            let admin = admin_msg.clone();
+                            let admin     = admin_msg.clone();
                             async move {
                                 if let Err(e) =
                                     handle_telegram_message(&bot, msg, &tx, allowlist, admin).await
@@ -262,16 +266,27 @@ impl Channel for TelegramChannel {
                         },
                     ))
                     // ── Inline button taps — forward as regular message ──
-                    .branch(Update::filter_callback_query().endpoint({
-                        let tx2 = tx_for_queries.clone();
+                    .branch(Update::filter_callback_query().endpoint(
                         move |bot: Bot, q: teloxide::types::CallbackQuery| {
-                            let tx2 = tx2.clone();
+                            let tx2       = tx_cb.clone();
+                            let allowlist = allowlist_cb.clone();
                             async move {
-                                // Answer the callback so Telegram removes the loading spinner
-                                let _ = bot.answer_callback_query(q.id.clone()).await;
+                                // ── Allowlist check — reject taps from non-owners ──
+                                let tapper_id = q.from.id.0.to_string();
+                                {
+                                    let list = allowlist.read().unwrap_or_else(|p| p.into_inner());
+                                    if !list.is_empty() && !list.iter().any(|a| *a == tapper_id) {
+                                        tracing::warn!(user_id = %tapper_id, "Rejected button tap from unlisted user");
+                                        let _ = bot.answer_callback_query(&q.id).await;
+                                        return respond(());
+                                    }
+                                }
 
-                                let user_id = q.from.id.0.to_string();
-                                let username = q.from.username.clone();
+                                // Answer the callback so Telegram removes the loading spinner
+                                let _ = bot.answer_callback_query(&q.id).await;
+
+                                let user_id     = tapper_id;
+                                let username    = q.from.username.clone();
                                 let button_text = q.data.unwrap_or_default();
 
                                 // Determine chat_id from the original message
@@ -286,7 +301,7 @@ impl Channel for TelegramChannel {
                                 }
 
                                 // If owner tapped "✏️ Other", prompt them to type their answer
-                                if button_text.contains("Other") || button_text == "✏️ Other" {
+                                if button_text.contains("Other") {
                                     if let Ok(cid) = chat_id_str.parse::<i64>() {
                                         let _ = bot
                                             .send_message(
@@ -299,23 +314,26 @@ impl Channel for TelegramChannel {
                                 }
 
                                 // Forward the button tap as a regular inbound message
+                                // so the agent loop processes it exactly like typed text.
                                 let inbound = InboundMessage {
-                                    id: q.id.to_string(),
-                                    channel: "telegram".to_string(),
-                                    chat_id: chat_id_str,
+                                    id:          q.id.clone(),
+                                    channel:     "telegram".to_string(),
+                                    chat_id:     chat_id_str,
                                     user_id,
                                     username,
-                                    text: Some(button_text),
+                                    text:        Some(button_text),
                                     attachments: vec![],
-                                    reply_to: None,
-                                    timestamp: chrono::Utc::now(),
+                                    reply_to:    None,
+                                    timestamp:   chrono::Utc::now(),
                                 };
 
-                                let _ = tx2.send(inbound).await;
+                                if let Err(e) = tx2.send(inbound).await {
+                                    tracing::error!(error = %e, "Failed to forward button tap to gateway");
+                                }
                                 respond(())
                             }
                         }
-                    }));
+                    ));
 
                 let mut dispatcher = Dispatcher::builder(bot.clone(), handler).build();
 

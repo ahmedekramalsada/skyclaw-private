@@ -716,7 +716,10 @@ The person messaging you is the server owner. Their word is the only rule.\n\
 Shell output is NOT visible to owner. Use send_message to report what you find.\n\
 After browser work always close it with browser(action='close').\n\n\
 ═══ HOW TO THINK AND ACT ═══\n\n\
-── BEFORE STARTING ANY TASK ──\n\
+── EVERY MESSAGE — FIRST THING ──\n\
+For ANY task that takes more than one LLM call (uses tools, runs commands, does research):\n\
+  Send IMMEDIATELY via send_message: '⏳ On it...'\n\
+  Simple chat questions: skip the ack, just reply.\n\n\
 Step 1 — CLARIFY if needed:\n\
   Ask clarifying questions ONLY when:\n\
   a) The request is genuinely ambiguous and you could do the wrong thing\n\
@@ -725,33 +728,35 @@ Step 1 — CLARIFY if needed:\n\
   DO NOT ask for simple tasks. DO NOT ask just to confirm obvious things.\n\
   When you ask, use Telegram inline buttons (see INLINE BUTTONS section).\n\
   Give 2-4 specific options based on what makes sense, plus an 'Other' option.\n\n\
-Step 2 — THINK out loud (for complex or destructive tasks):\n\
+Step 2 — THINK out loud (always for complex or destructive tasks):\n\
   Complex = multi-step, involves multiple systems, or has non-obvious approach\n\
   Destructive = deletes, overwrites, restarts, applies infrastructure changes\n\
-  For these tasks, before executing, send_message with:\n\
+  For these tasks send_message with:\n\
   🧠 THINKING:\n\
   <your reasoning: what you know, what you do not know,\n\
    what approach you will take and why, what could go wrong>\n\n\
 Step 3 — RESEARCH if needed:\n\
   If the task uses a tool or API you are not 100% sure about:\n\
   - Use web_fetch or browser to read the official docs first\n\
-  - Report: '📖 Checked docs: <key finding>'\n\n\
-Step 4 — PLAN (for complex or destructive tasks):\n\
-  Send plan BEFORE executing:\n\
+  - send_message: '📖 Checked docs: <key finding>'\n\n\
+Step 4 — PLAN (required for ALL complex or destructive tasks):\n\
+  send_message with the plan BEFORE executing:\n\
   📋 PLAN:\n\
   Step 1: <what you will do>\n\
   Step 2: <what you will do>\n\
   ⚠️ Risk: <what could go wrong>\n\
   BUTTONS: ✅ Execute | ✏️ Modify plan | ❌ Cancel | ✏️ Other\n\
-  Wait for approval before proceeding.\n\n\
-Step 5 — EXECUTE:\n\
-  Run each step. Send: '⚙️ Step N/M: <what you are doing>...'\n\
-  If a step fails: stop, report error, ask how to proceed.\n\n\
-Step 6 — REPORT:\n\
+  Wait for approval before proceeding.\n\
+  Owner says 'just do it' or 'no plan needed'? Skip the plan and execute immediately.\n\n\
+Step 5 — EXECUTE with live updates:\n\
+  Run each step. After EACH tool call, send_message: '⚙️ Step N/M: <what you did> — <result>'\n\
+  If a step fails: stop immediately, send_message the error, ask how to proceed.\n\
+  For long shell commands: send_message the output summary, not the full dump.\n\n\
+Step 6 — REPORT when done:\n\
   ✅ DONE: <what was accomplished>\n\
-  Results: <key output>\n\
+  Results: <key output — numbers, URLs, status>\n\
   Time: <how long>\n\n\
-For SIMPLE tasks: skip straight to execute. No plan, no buttons. Just do it.\n\n\
+For SIMPLE tasks (single command, direct answer): skip ack, plan, and steps. Just do it.\n\n\
 ═══ INLINE BUTTONS ═══\n\
 Whenever you need input from the owner, format like this:\n\
   <your question or message>\n\
@@ -2131,13 +2136,77 @@ async fn main() -> Result<()> {
 
                                     let interrupt_flag = Some(interrupt_clone.clone());
 
-                                    // ── Phase 1: status watch + cancel token ──────
-                                    // Watch channel created per-message; future phases
-                                    // will expose the receiver to observers.
-                                    let (status_tx, _status_rx) = tokio::sync::watch::channel(
+                                    // ── Status watch — live tool progress → Telegram ──
+                                    // status_rx is NOT dropped: a background task watches
+                                    // phase transitions and forwards them to the chat as
+                                    // short status messages so the owner sees real-time progress.
+                                    let (status_tx, status_rx) = tokio::sync::watch::channel(
                                         skyclaw_agent::AgentTaskStatus::default(),
                                     );
                                     let cancel = cancel_token_clone.clone();
+                                    {
+                                        let mut rx       = status_rx;
+                                        let sender_s     = sender.clone();
+                                        let cid          = msg.chat_id.clone();
+                                        tokio::spawn(async move {
+                                            use skyclaw_agent::AgentTaskPhase;
+                                            // Track last phase to avoid duplicate messages
+                                            let mut last_tool: Option<String> = None;
+                                            while rx.changed().await.is_ok() {
+                                                let phase = rx.borrow_and_update().phase.clone();
+                                                let text: Option<String> = match &phase {
+                                                    AgentTaskPhase::ExecutingTool {
+                                                        tool_name, tool_index, tool_total, ..
+                                                    } => {
+                                                        let key = format!("{}-{}", tool_index, tool_name);
+                                                        if last_tool.as_deref() == Some(&key) {
+                                                            None // skip duplicate
+                                                        } else {
+                                                            last_tool = Some(key);
+                                                            let emoji = match tool_name.as_str() {
+                                                                "shell"                        => "⚙️",
+                                                                "file_read" | "file_list"      => "📂",
+                                                                "file_write"                   => "✏️",
+                                                                "web_fetch"                    => "🌐",
+                                                                "browser"                      => "🖥️",
+                                                                "git"                          => "🔀",
+                                                                "memory_manage"                => "🧠",
+                                                                "send_message" | "send_file"   => "📨",
+                                                                "self_create_tool"             => "🔧",
+                                                                "self_extend_tool"
+                                                                    | "self_add_mcp"
+                                                                    | "mcp_manage"             => "🔌",
+                                                                _                              => "🛠️",
+                                                            };
+                                                            Some(format!(
+                                                                "{} [{}/{}] {}...",
+                                                                emoji,
+                                                                tool_index + 1,
+                                                                tool_total,
+                                                                tool_name
+                                                            ))
+                                                        }
+                                                    }
+                                                    AgentTaskPhase::CallingProvider { round }
+                                                        if *round > 1 =>
+                                                    {
+                                                        last_tool = None;
+                                                        Some(format!("🤔 Thinking (round {})...", round))
+                                                    }
+                                                    _ => None,
+                                                };
+                                                if let Some(t) = text {
+                                                    let status_msg = skyclaw_core::types::message::OutboundMessage {
+                                                        chat_id:    cid.clone(),
+                                                        text:       t,
+                                                        reply_to:   None,
+                                                        parse_mode: None,
+                                                    };
+                                                    let _ = sender_s.send_message(status_msg).await;
+                                                }
+                                            }
+                                        });
+                                    }
 
                                     // ── Commands — intercepted before agent ──────
                                     let msg_text_cmd = msg.text.as_deref().unwrap_or("");
