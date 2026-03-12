@@ -273,7 +273,7 @@ impl Channel for TelegramChannel {
                             async move {
                                 // Extract ALL fields from q immediately before any moves or awaits.
                                 // This avoids partial-move errors and keeps the types clean.
-                                let callback_id  = q.id.clone();
+                                let callback_id  = q.id.to_string();
                                 let user_id      = q.from.id.0.to_string();
                                 let username     = q.from.username.clone();
                                 let button_text  = q.data.unwrap_or_default();
