@@ -45,7 +45,7 @@ info() { echo -e "${BLUE}→${RESET} $1"; }
 
 # ── Step 1: Build locally ────────────────────────────────────────────────────
 info "Building $BINARY_NAME locally in release mode..."
-cargo build --release -j1
+cargo build --release
 
 if [[ ! -f "$LOCAL_BINARY" ]]; then
   echo -e "Error: Local binary not found at $LOCAL_BINARY"

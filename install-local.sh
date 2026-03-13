@@ -55,7 +55,7 @@ fi
 # ── Step 2: Build ────────────────────────────────────────────────────────────
 info "Building skyclaw locally..."
 cd "$REPO_DIR"
-cargo build --release -j1
+cargo build --release
 
 if [[ -f "target/release/skyclaw" ]]; then
   ok "Local build complete: target/release/skyclaw"
