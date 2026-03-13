@@ -1760,6 +1760,31 @@ async fn main() -> Result<()> {
                 }
             };
 
+            // ── Bootstrap credentials.toml from env-var config ─────────────
+            // If we resolved credentials from skyclaw.toml env vars but
+            // credentials.toml is empty/missing, write them now so that
+            // /model, /keys, and all Telegram management commands work.
+            if let Some((ref pname, ref pkey, ref pmodel)) = credentials {
+                if !is_placeholder_key(pkey) {
+                    let existing = load_credentials_file();
+                    let needs_bootstrap = existing.map_or(true, |c| {
+                        c.providers.is_empty()
+                            || !c.providers.iter().any(|p| p.name == *pname)
+                    });
+                    if needs_bootstrap {
+                        tracing::info!(
+                            provider = %pname,
+                            "Bootstrapping credentials.toml from env-var config"
+                        );
+                        if let Err(e) =
+                            save_credentials(pname, pkey, pmodel, None).await
+                        {
+                            tracing::warn!(error = %e, "Failed to bootstrap credentials.toml");
+                        }
+                    }
+                }
+            }
+
             // ── Memory backend ─────────────────────────────────
             let memory_url = config.memory.path.clone().unwrap_or_else(|| {
                 let data_dir = dirs::home_dir()
