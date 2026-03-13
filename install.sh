@@ -66,6 +66,30 @@ if ! command -v git &>/dev/null; then
 fi
 ok "git found"
 
+# ── Node.js + npx (required for MCP servers) ─────────────────────────────────
+if ! command -v node &>/dev/null; then
+  warn "Node.js not found. Installing via NodeSource (LTS)..."
+  curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - >/dev/null 2>&1
+  apt-get install -y nodejs >/dev/null 2>&1
+  ok "Node.js installed: $(node --version)"
+else
+  ok "Node.js found: $(node --version)"
+fi
+
+if ! command -v npx &>/dev/null; then
+  err "npx not found after Node.js install — try: apt install nodejs"
+fi
+ok "npx found"
+
+# ── OpenCode — AI coding agent (used as MCP by batabeto) ─────────────────────
+if ! command -v opencode &>/dev/null; then
+  info "Installing opencode-ai (coding agent for MCP delegation)..."
+  npm install -g opencode-ai --silent
+  ok "opencode installed: $(opencode --version 2>/dev/null || echo 'ok')"
+else
+  ok "opencode found: $(opencode --version 2>/dev/null || echo 'ok')"
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 header "STEP 2 — Building release binary"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +179,15 @@ header "STEP 5 — Copying config files"
 cp "$REPO_DIR/skyclaw.toml" "$INSTALL_DIR/skyclaw.toml"
 ok "Copied skyclaw.toml → $INSTALL_DIR/skyclaw.toml"
 
+# MCP servers config — only copy if not already customised
+MCP_TOML="$INSTALL_DIR/mcp.toml"
+if [[ -f "$MCP_TOML" ]]; then
+  warn "mcp.toml already exists — skipping (keeping your customised MCP list)"
+else
+  cp "$REPO_DIR/deploy/mcp.toml" "$MCP_TOML"
+  ok "Copied mcp.toml → $MCP_TOML (5 MCP servers pre-configured)"
+fi
+
 # Heartbeat checklist
 cp "$REPO_DIR/workspace/HEARTBEAT.md" "$INSTALL_DIR/workspace/HEARTBEAT.md"
 ok "Copied HEARTBEAT.md → $INSTALL_DIR/workspace/HEARTBEAT.md"
@@ -196,6 +229,34 @@ else
   warn "You MUST edit $ENV_FILE and set:"
   warn "  TELEGRAM_BOT_TOKEN=your-token-here"
   warn "  OPENROUTER_API_KEY=sk-or-v1-your-key-here"
+fi
+
+# ── OpenCode config — point it at OpenRouter ─────────────────────────────────
+OPENCODE_CONFIG_DIR="/root/.config/opencode"
+OPENCODE_CONFIG="$OPENCODE_CONFIG_DIR/opencode.json"
+
+mkdir -p "$OPENCODE_CONFIG_DIR"
+
+if [[ -f "$OPENCODE_CONFIG" ]]; then
+  warn "opencode config already exists — skipping"
+else
+  # Load env to read OPENCODE_MODEL if already set
+  if [[ -f "$ENV_FILE" ]]; then
+    set -a; source "$ENV_FILE" 2>/dev/null || true; set +a
+  fi
+  OPENCODE_MODEL_VAL="${OPENCODE_MODEL:-deepseek/deepseek-r1-0528}"
+
+  cat > "$OPENCODE_CONFIG" << OEOF
+{
+  "provider": "openrouter",
+  "model": "$OPENCODE_MODEL_VAL",
+  "autoshare": false,
+  "disabled_providers": []
+}
+OEOF
+  chmod 600 "$OPENCODE_CONFIG"
+  ok "Created opencode config → $OPENCODE_CONFIG (model: $OPENCODE_MODEL_VAL)"
+  info "Change the model anytime: edit OPENCODE_MODEL in $ENV_FILE and re-run install.sh"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -319,7 +380,9 @@ echo -e "${BOLD}NEXT STEPS:${RESET}"
 echo ""
 echo -e "  ${YELLOW}1.${RESET} Edit your secrets:"
 echo -e "     ${BLUE}nano $INSTALL_DIR/.env${RESET}"
-echo -e "     Set: TELEGRAM_BOT_TOKEN and OPENROUTER_API_KEY"
+echo -e "     Required: TELEGRAM_BOT_TOKEN and OPENROUTER_API_KEY"
+echo -e "     For GitHub MCP: set GITHUB_PERSONAL_ACCESS_TOKEN (same value as GITHUB_TOKEN)"
+echo -e "     For a different OpenCode model: set OPENCODE_MODEL (default: deepseek/deepseek-r1-0528)"
 echo ""
 echo -e "  ${YELLOW}2.${RESET} Start batabeto:"
 echo -e "     ${BLUE}systemctl start skyclaw${RESET}"

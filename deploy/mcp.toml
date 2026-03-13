@@ -1,0 +1,84 @@
+# batabeto — MCP Servers
+# Loaded from ~/.skyclaw/mcp.toml at startup.
+# Add/remove via Telegram: /mcp add <name> <command>  |  /mcp remove <name>
+#
+# ENV VARS — these MCP servers read the following from your .env:
+#   GITHUB_PERSONAL_ACCESS_TOKEN  — GitHub MCP (issues, PRs, code search)
+#   GRAFANA_URL + GRAFANA_API_KEY — Grafana MCP (uncomment [[servers]] block below)
+# All other servers need no API key.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[settings]
+max_servers     = 10
+call_timeout_secs = 60
+auto_restart    = true
+max_restart_attempts = 3
+
+# ── OpenCode — AI coding agent ────────────────────────────────────────────────
+# Handles multi-file coding tasks: refactors, new features, bug fixes.
+# Has full LSP, treesitter, git awareness — far better than raw file_write.
+# batabeto delegates to this when a task touches >3 files or >50 lines.
+# Requires: opencode-ai installed (install.sh handles this automatically).
+[[servers]]
+name      = "opencode"
+transport = "stdio"
+command   = "npx"
+args      = ["-y", "opencode-mcp"]
+
+# ── GitHub — repos, issues, PRs ──────────────────────────────────────────────
+# Read/write issues, open PRs, search code, view CI status, push commits.
+# Reads GITHUB_PERSONAL_ACCESS_TOKEN from environment (set in .env).
+[[servers]]
+name      = "github"
+transport = "stdio"
+command   = "npx"
+args      = ["-y", "@modelcontextprotocol/server-github"]
+
+# ── package-docs — free multi-language package docs ──────────────────────────
+# Reads real docs from npm, PyPI, Go, Rust — no API key, no rate limits, MIT.
+# Replaces Context7 which cut its free tier to 1000 req/month in early 2026.
+# Covers: npm packages, Python (PyPI), Go (pkg.go.dev), Rust (crates.io/docs.rs)
+[[servers]]
+name      = "package-docs"
+transport = "stdio"
+command   = "npx"
+args      = ["-y", "mcp-package-docs"]
+
+# ── kubernetes — natural language K8s operations ─────────────────────────────
+# TypeScript, MIT, fully free. Exposes pods, deployments, services, logs,
+# exec, port-forward as MCP tools. Works with K3s (reads your KUBECONFIG).
+[[servers]]
+name      = "kubernetes"
+transport = "stdio"
+command   = "npx"
+args      = ["-y", "mcp-server-kubernetes"]
+
+# ── Fetch — read any URL ───────────────────────────────────────────────────────
+# Fetches documentation pages, runbooks, Stack Overflow, release notes, APIs.
+# Used for: "check the Helm chart release notes" / "read the K8s docs for X"
+# No API key required.
+[[servers]]
+name      = "fetch"
+transport = "stdio"
+command   = "npx"
+args      = ["-y", "@modelcontextprotocol/server-fetch"]
+
+# ── Sequential Thinking — structured reasoning ────────────────────────────────
+# Breaks complex multi-step problems into a transparent reasoning chain.
+# Used for: incident diagnosis, deployment planning, architecture decisions.
+# No API key required.
+[[servers]]
+name      = "think"
+transport = "stdio"
+command   = "npx"
+args      = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+
+# ── Grafana — observability queries ───────────────────────────────────────────
+# Query Prometheus metrics, Loki logs, search dashboards, manage alerts.
+# Uncomment if you run Grafana. Requires GRAFANA_URL + GRAFANA_API_KEY in .env.
+#
+# [[servers]]
+# name      = "grafana"
+# transport = "stdio"
+# command   = "npx"
+# args      = ["-y", "@modelcontextprotocol/server-grafana"]
