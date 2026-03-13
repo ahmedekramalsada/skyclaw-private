@@ -98,13 +98,31 @@ header "STEP 2 — Building release binary"
 # -j1 means one compilation job at a time — crates compile sequentially.
 # This is intentional: parallel Rust builds on small servers cause OOM kills
 # and mysterious hangs. Sequential is slower but always finishes.
+
+# Check for linker
+if ! command -v cc &>/dev/null; then
+  warn "cc (linker) not found in PATH. Checking common locations..."
+  export PATH="$PATH:/usr/bin:/usr/local/bin"
+  if ! command -v cc &>/dev/null; then
+    warn "linker 'cc' not found. Installing build-essential..."
+    apt-get update && apt-get install -y build-essential
+    if ! command -v cc &>/dev/null; then
+      err "linker 'cc' still not found after installing build-essential."
+    fi
+  fi
+fi
+
 info "Building skyclaw in release mode (-j1, one crate at a time)..."
 info "This takes 20–40 min on a fresh server (incremental builds are much faster)."
 echo ""
 
 cd "$REPO_DIR"
 
-# Stream progress — you see each crate as it compiles
+# Ensure we don't use a stale binary if build fails
+rm -f target/release/skyclaw
+
+# Stream progress — use pipefail to ensure cargo failure is detected
+set -o pipefail
 cargo build --release -j1 2>&1 | grep -E "^error|^warning|Compiling |Finished " || true
 
 if [[ ! -f "$REPO_DIR/target/release/skyclaw" ]]; then

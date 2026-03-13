@@ -51,6 +51,16 @@ fi
 
 # ── Step 2 — Build ───────────────────────────────────────────────────────────
 header "STEP 2 — Building release binary"
+
+# Check for linker
+if ! command -v cc &>/dev/null; then
+  warn "cc (linker) not found in PATH. Checking common locations..."
+  export PATH="$PATH:/usr/bin:/usr/local/bin"
+  if ! command -v cc &>/dev/null; then
+    err "linker 'cc' still not found. Try: apt install build-essential"
+  fi
+fi
+
 info "Using -j1 (one crate at a time). Slow on first build, fast on incremental."
 
 source "$HOME/.cargo/env" 2>/dev/null || true
@@ -61,10 +71,15 @@ echo ""
 
 cd "$REPO_DIR"
 
+# Ensure we don't use a stale binary if build fails
+rm -f target/release/skyclaw
+
+# Stream progress — use pipefail to ensure cargo failure is detected
+set -o pipefail
 cargo build --release -j1 2>&1 | grep -E "^error|^warning|Compiling |Finished " || true
 
 if [[ ! -f "$REPO_DIR/target/release/skyclaw" ]]; then
-  err "Build failed — binary not found"
+  err "Build failed — binary not found. Try: sudo -E bash update.sh"
 fi
 ok "Build complete: $(du -sh $REPO_DIR/target/release/skyclaw | cut -f1)"
 
