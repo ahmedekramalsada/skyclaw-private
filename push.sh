@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # batabeto — Push Binary to Server
-# Usage: bash push.sh <server-ip>
+# Usage: bash push.sh <target>
 #
+# <target> can be an IP address (e.g. 1.2.3.4) or an SSH alias (e.g. x).
 # This script builds the binary locally and uploads it to the server.
 # Use this to skip the long compilation time on the server itself.
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
-SERVER_IP="${1:-}"
+TARGET="${1:-}"
 
-if [[ -z "$SERVER_IP" ]]; then
-  echo -e "Usage: bash push.sh <server-ip>"
+if [[ -z "$TARGET" ]]; then
+  echo -e "Usage: bash push.sh <target>"
   echo -e "Example: bash push.sh 1.2.3.4"
+  echo -e "Example: bash push.sh x"
   exit 1
 fi
 
@@ -41,11 +43,17 @@ fi
 ok "Local build complete: $(du -sh "$LOCAL_BINARY" | cut -f1)"
 
 # ── Step 2: Upload ───────────────────────────────────────────────────────────
-info "Uploading binary to root@$SERVER_IP:$REMOTE_PATH..."
-scp "$LOCAL_BINARY" "root@$SERVER_IP:$REMOTE_PATH"
+REMOTE_DEST="$TARGET"
+# If it's a naked IP (no @), default to root@
+if [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  REMOTE_DEST="root@$TARGET"
+fi
+
+info "Uploading binary to $REMOTE_DEST:$REMOTE_PATH..."
+scp "$LOCAL_BINARY" "$REMOTE_DEST:$REMOTE_PATH"
 ok "Upload complete"
 
 # ── Step 3: Restart ──────────────────────────────────────────────────────────
 info "Restarting $BINARY_NAME service on server..."
-ssh "root@$SERVER_IP" "chmod +x $REMOTE_PATH && systemctl restart skyclaw"
-ok "$BINARY_NAME is restarting on server. Watch logs with: ssh root@$SERVER_IP 'journalctl -fu skyclaw'"
+ssh "$REMOTE_DEST" "chmod +x $REMOTE_PATH && systemctl restart skyclaw"
+ok "$BINARY_NAME is restarting on $REMOTE_DEST. Watch logs with: ssh $REMOTE_DEST 'journalctl -fu skyclaw'"
