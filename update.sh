@@ -33,8 +33,6 @@ fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINARY_PATH="/usr/local/bin/skyclaw"
-SWAP_FILE=/swapfile_batabeto_build
-
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════╗${RESET}"
 echo -e "${BOLD}║       batabeto — Fast Update             ║${RESET}"
@@ -51,22 +49,9 @@ else
   warn "batabeto was not running"
 fi
 
-# ── Step 2 — Add swap if RAM is low ──────────────────────────────────────────
-TOTAL_RAM_MB=$(free -m | awk '/^Mem:/ {print $2}')
-
-if [[ "$TOTAL_RAM_MB" -lt 3072 ]]; then
-  warn "Low RAM (${TOTAL_RAM_MB} MB) — adding 2 GB swap for the build..."
-  if [[ ! -f "$SWAP_FILE" ]]; then
-    dd if=/dev/zero of="$SWAP_FILE" bs=1M count=2048 status=none
-    chmod 600 "$SWAP_FILE"
-    mkswap "$SWAP_FILE" >/dev/null
-  fi
-  swapon "$SWAP_FILE" 2>/dev/null || true
-  ok "Swap enabled"
-fi
-
-# ── Step 3 — Build ───────────────────────────────────────────────────────────
+# ── Step 2 — Build ───────────────────────────────────────────────────────────
 header "STEP 2 — Building release binary"
+info "Using -j1 (one crate at a time). Slow on first build, fast on incremental."
 
 source "$HOME/.cargo/env" 2>/dev/null || true
 
@@ -76,31 +61,21 @@ echo ""
 
 cd "$REPO_DIR"
 
-export CARGO_BUILD_JOBS=1
-export RUSTFLAGS="-C codegen-units=1 -C opt-level=s"
-
-cargo build --release --jobs 1 2>&1 | grep -E "Compiling|Finished|error\[|warning\[" || true
+cargo build --release -j1 2>&1 | grep -E "^error|^warning|Compiling |Finished " || true
 
 if [[ ! -f "$REPO_DIR/target/release/skyclaw" ]]; then
   err "Build failed — binary not found"
 fi
 ok "Build complete: $(du -sh $REPO_DIR/target/release/skyclaw | cut -f1)"
 
-# ── Step 4 — Install binary ───────────────────────────────────────────────────
+# ── Step 3 — Install binary ───────────────────────────────────────────────────
 header "STEP 3 — Installing binary"
 
 cp "$REPO_DIR/target/release/skyclaw" "$BINARY_PATH"
 chmod 755 "$BINARY_PATH"
 ok "Binary installed: $BINARY_PATH"
 
-# ── Step 5 — Remove swap ─────────────────────────────────────────────────────
-if [[ -f "$SWAP_FILE" ]]; then
-  swapoff "$SWAP_FILE" 2>/dev/null || true
-  rm -f "$SWAP_FILE"
-  ok "Build swap removed"
-fi
-
-# ── Step 6 — Restart ─────────────────────────────────────────────────────────
+# ── Step 4 — Restart ─────────────────────────────────────────────────────────
 header "STEP 4 — Restarting batabeto"
 
 systemctl start skyclaw

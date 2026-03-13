@@ -450,6 +450,87 @@ impl Channel for TelegramChannel {
         );
         Ok(())
     }
+
+    /// Send a "typing..." action — shows the typing indicator in Telegram.
+    async fn send_typing(&self, chat_id: &str) -> Result<(), SkyclawError> {
+        let bot = match self.bot.as_ref() {
+            Some(b) => b,
+            None => return Ok(()), // silently ignore if not started
+        };
+        let cid = chat_id.parse::<i64>().map(ChatId).map_err(|_| {
+            SkyclawError::Channel(format!("Invalid chat_id for typing: {}", chat_id))
+        })?;
+        // Ignore errors — typing indicator is best-effort
+        let _ = bot
+            .send_chat_action(cid, teloxide::types::ChatAction::Typing)
+            .await;
+        Ok(())
+    }
+
+    /// Edit an existing message in-place.
+    async fn edit_message(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        new_text: &str,
+    ) -> Result<(), SkyclawError> {
+        let bot = self
+            .bot
+            .as_ref()
+            .ok_or_else(|| SkyclawError::Channel("Telegram bot not started".into()))?;
+
+        let cid = chat_id.parse::<i64>().map(ChatId).map_err(|_| {
+            SkyclawError::Channel(format!("Invalid chat_id: {}", chat_id))
+        })?;
+        let mid = teloxide::types::MessageId(message_id.parse::<i32>().map_err(|_| {
+            SkyclawError::Channel(format!("Invalid message_id: {}", message_id))
+        })?);
+
+        bot.edit_message_text(cid, mid, new_text)
+            .await
+            .map_err(|e| SkyclawError::Channel(format!("Failed to edit message: {e}")))?;
+        Ok(())
+    }
+
+    /// Send a message and return its Telegram message_id for later editing.
+    async fn send_message_with_id(
+        &self,
+        msg: OutboundMessage,
+    ) -> Result<String, SkyclawError> {
+        let bot = self
+            .bot
+            .as_ref()
+            .ok_or_else(|| SkyclawError::Channel("Telegram bot not started".into()))?;
+
+        let chat_id: ChatId = msg
+            .chat_id
+            .parse::<i64>()
+            .map(ChatId)
+            .map_err(|_| SkyclawError::Channel(format!("Invalid chat_id: {}", msg.chat_id)))?;
+
+        let (clean_text, keyboard_opt) = extract_inline_keyboard(&msg.text);
+        let send_text = if clean_text.is_empty() { &msg.text } else { &clean_text };
+
+        let mut request = bot.send_message(chat_id, send_text);
+
+        if let Some(ref mode) = msg.parse_mode {
+            request = match mode {
+                ParseMode::Markdown => request.parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                ParseMode::Html => request.parse_mode(teloxide::types::ParseMode::Html),
+                ParseMode::Plain => request,
+            };
+        }
+
+        if let Some(keyboard) = keyboard_opt {
+            request = request.reply_markup(keyboard);
+        }
+
+        let sent = request
+            .await
+            .map_err(|e| SkyclawError::Channel(format!("Failed to send message: {e}")))?;
+
+        Ok(sent.id.0.to_string())
+    }
 }
 
 #[async_trait]

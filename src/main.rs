@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+/// Global flag — toggled by /alerts on|off command.
+/// Checked by the proactive alert monitor before sending any alert.
+static ALERTS_ENABLED: AtomicBool = AtomicBool::new(true);
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -798,14 +802,48 @@ Rules:\n\
 - Keep labels short (1-5 words)\n\
 - Use for: plan approval, clarifying questions, option selection, destructive confirmations\n\
 - Reply in same language owner writes in\n\n\
-═══ MEMORY ═══\n\
-Aggressively store everything important in memory_manage:\n\
-- Every server: name, IP, SSH user, what it runs\n\
-- Every tool path: kubeconfig, ansible inventory, terraform workspace\n\
-- Every preference, service, incident, recurring task\n\
-Recall relevant memories before starting any task.\n\
-'remember X' → store + confirm: '🧠 Remembered: X'\n\
-'forget X' → delete + confirm: '🗑️ Forgot: X'\n\n\
+═══ MEMORY — TOPIC-SCOPED ═══\n\
+Memory tool: memory_manage. Actions: remember / recall / forget / update / list.\n\
+Use tags=[] to scope entries by topic. Use scope="global" for all cross-session facts.\n\n\
+TOPICS — always pass as a tag (use exactly these strings):\n\
+  servers       — IPs, SSH users, hostnames, what each server runs\n\
+  kubernetes    — kubeconfigs, namespaces, deployments, K3s specifics\n\
+  terraform     — workspaces, state files, provider configs\n\
+  ansible       — inventories, playbook paths, roles\n\
+  docker        — compose files, registries, image names\n\
+  incidents     — past outages, what broke, how it was fixed\n\
+  preferences   — owner preferences, communication style, recurring requests\n\
+  cron          — all scheduled tasks you manage\n\
+  mcp           — MCP servers installed, why, what they do\n\
+  github        — repos, branches, deploy keys, CI patterns\n\n\
+STORING — always include the topic tag:\n\
+  action: remember  key: "server1"  content: "10.0.0.5, root, runs nginx"  tags: ["servers"]  scope: "global"\n\
+  Confirm: '🧠 Remembered [servers]: <summary>'\n\n\
+RECALLING — always filter by tag before starting any task:\n\
+  action: recall  query: "server1"  tags: ["servers"]  scope: "global"\n\
+  action: recall  query: "k3s namespace"  tags: ["kubernetes"]  scope: "global"\n\
+  ALWAYS pull topic memories BEFORE calling any tool — context first, then execute.\n\n\
+FORGETTING:\n\
+  action: forget  key: "server1"  scope: "global"\n\
+  Confirm: '🗑️ Forgot: server1'\n\n\
+RULES:\n\
+- Store IMMEDIATELY when owner mentions a server, service, preference, or incident.\n\
+- Never store raw credentials — store references ("vault:openrouter_key") not values.\n\
+- 'remember X' → action=remember + correct tag → confirm: '🧠 Remembered [tag]: X'\n\
+- 'forget X' → action=forget by key → confirm: '🗑️ Forgot: X'\n\n\
+═══ SCHEDULED TASKS (CRON) ═══\n\
+Owner can ask you to run any task on a schedule in plain English.\n\
+Examples: 'check disk space every day at 8am' / 'restart nginx every Sunday at 3am'\n\n\
+When asked to schedule something:\n\
+1. Parse into a cron expression (e.g. '0 8 * * *' for 8am daily)\n\
+2. Write script to /root/.skyclaw/workspace/cron/<task-name>.sh\n\
+3. Register: (crontab -l 2>/dev/null; echo '<expr> bash /root/.skyclaw/workspace/cron/<task-name>.sh >> /root/.skyclaw/workspace/cron/<task-name>.log 2>&1') | crontab -\n\
+4. Store: action=remember  key="cron-<task>"  content="<what/when/path>"  tags=["cron"]  scope="global"\n\
+5. Confirm: '⏰ Scheduled: <description> (<cron-expr>)'\n\n\
+Managing schedules:\n\
+- 'show my scheduled tasks' → crontab -l + action=recall  tags=["cron"]\n\
+- 'cancel <task>' → remove from crontab + delete script + action=forget  key="cron-<task>"\n\
+- 'run <task> now' → execute the script immediately, report result\n\n\
 ═══ SELF-MANAGEMENT ═══\n\n\
 ── CREATING SKILLS ──\n\
 Create ~/.skyclaw/skills/<name>.md when you learn a reusable pattern.\n\
@@ -826,9 +864,8 @@ On fresh install: ALWAYS run bash ~/.skyclaw/workspace/restore.sh first.\n\
 On demand: run backup when owner says 'backup now'.\n\n\
 ── SELF-UPDATE ──\n\
 When owner says 'update yourself':\n\
-  git pull && cargo build --release\n\
-  sudo cp target/release/skyclaw /usr/local/bin/skyclaw\n\
-  sudo systemctl restart skyclaw\n\n\
+  cd /path/to/repo && sudo bash update.sh\n\
+  update.sh handles: stop → swap → incremental build → install → restart.\n\n\
 ═══ DEVOPS WORKFLOWS ═══\n\n\
 ── SSH MULTI-SERVER ──\n\
 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i /root/.ssh/batabeto <user>@<host> '<cmd>'\n\
@@ -1994,6 +2031,202 @@ async fn main() -> Result<()> {
                 );
             }
 
+            // ── Proactive Alert Monitor ────────────────────────
+            // Polls CPU, disk, memory, and K3s every 5 minutes.
+            // Sends an alert message directly to the owner's chat if
+            // a threshold is crossed. Fully self-contained — no agent
+            // call needed for the check itself, only for remediation.
+            {
+                let alert_tx = msg_tx.clone();
+                // Prefer OWNER_CHAT_ID env var (set by user in .env),
+                // fall back to heartbeat.report_to from skyclaw.toml.
+                // The proactive monitor is disabled only if neither is set.
+                let alert_chat_id = std::env::var("OWNER_CHAT_ID")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| config.heartbeat.report_to.clone())
+                    .unwrap_or_default();
+
+                if !alert_chat_id.is_empty() && alert_chat_id != "heartbeat" {
+                    task_handles.push(tokio::spawn(async move {
+                        // Cooldown tracking — don't re-alert for the same issue
+                        let mut last_cpu_alert: Option<std::time::Instant> = None;
+                        let mut last_disk_alert: Option<std::time::Instant> = None;
+                        let mut last_mem_alert: Option<std::time::Instant> = None;
+                        let mut last_k3s_alert: Option<std::time::Instant> = None;
+                        let cooldown = std::time::Duration::from_secs(30 * 60); // 30 min
+
+                        loop {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+
+                            // Skip all checks if alerts are disabled via /alerts off
+                            if !ALERTS_ENABLED.load(Ordering::Relaxed) {
+                                continue;
+                            }
+
+                            // ── CPU check ──────────────────────────────────────────
+                            let cpu_ok = last_cpu_alert
+                                .map(|t| t.elapsed() < cooldown)
+                                .unwrap_or(false);
+                            if !cpu_ok {
+                                // Read /proc/stat twice 200ms apart — reliable on all Linux distros.
+                                // top -bn1 is slow, distro-specific, and sometimes returns 0.
+                                let cpu_pct: Option<u32> = async {
+                                    let read_idle = |path: &str| -> Option<(u64, u64)> {
+                                        let s = std::fs::read_to_string(path).ok()?;
+                                        let line = s.lines().next()?;
+                                        let fields: Vec<u64> = line.split_whitespace()
+                                            .skip(1).filter_map(|v| v.parse().ok()).collect();
+                                        if fields.len() < 4 { return None; }
+                                        let total: u64 = fields.iter().sum();
+                                        Some((fields[3], total)) // (idle, total)
+                                    };
+                                    let (idle1, total1) = read_idle("/proc/stat")?;
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                                    let (idle2, total2) = read_idle("/proc/stat")?;
+                                    let d_total = total2.saturating_sub(total1);
+                                    let d_idle  = idle2.saturating_sub(idle1);
+                                    if d_total == 0 { return None; }
+                                    Some((100 - (d_idle * 100 / d_total)) as u32)
+                                }.await;
+
+                                if let Some(pct) = cpu_pct {
+                                    if pct > 85 {
+                                        let alert = skyclaw_core::types::message::InboundMessage {
+                                            id: uuid::Uuid::new_v4().to_string(),
+                                            channel: "proactive".to_string(),
+                                            chat_id: alert_chat_id.clone(),
+                                            user_id: "system".to_string(),
+                                            username: None,
+                                            text: Some(format!(
+                                                "🚨 ALERT: CPU {}% (threshold 85%)
+ps aux --sort=-%cpu | head -10",
+                                                pct
+                                            )),
+                                            attachments: vec![],
+                                            reply_to: None,
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        let _ = alert_tx.send(alert).await;
+                                        last_cpu_alert = Some(std::time::Instant::now());
+                                    }
+                                }
+                            }
+
+                            // ── Disk check ─────────────────────────────────────────
+                            let disk_ok = last_disk_alert
+                                .map(|t| t.elapsed() < cooldown)
+                                .unwrap_or(false);
+                            if !disk_ok {
+                                if let Ok(out) = tokio::process::Command::new("sh")
+                                    .arg("-c")
+                                    .arg("df / | awk 'NR==2{print $5}' | tr -d '%'")
+                                    .output().await
+                                {
+                                    let s = String::from_utf8_lossy(&out.stdout);
+                                    if let Ok(pct) = s.trim().parse::<u32>() {
+                                        if pct > 80 {
+                                            let alert = skyclaw_core::types::message::InboundMessage {
+                                                id: uuid::Uuid::new_v4().to_string(),
+                                                channel: "proactive".to_string(),
+                                                chat_id: alert_chat_id.clone(),
+                                                user_id: "system".to_string(),
+                                                username: None,
+                                                text: Some(format!(
+                                                    "🚨 ALERT: Disk {}% (threshold 80%)
+du -sh /* | sort -rh | head -10",
+                                                    pct
+                                                )),
+                                                attachments: vec![],
+                                                reply_to: None,
+                                                timestamp: chrono::Utc::now(),
+                                            };
+                                            let _ = alert_tx.send(alert).await;
+                                            last_disk_alert = Some(std::time::Instant::now());
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ── Memory check ───────────────────────────────────────
+                            let mem_ok = last_mem_alert
+                                .map(|t| t.elapsed() < cooldown)
+                                .unwrap_or(false);
+                            if !mem_ok {
+                                if let Ok(out) = tokio::process::Command::new("sh")
+                                    .arg("-c")
+                                    .arg("free | awk '/^Mem:/{printf "%.0f", ($3/$2)*100}'")
+                                    .output().await
+                                {
+                                    let s = String::from_utf8_lossy(&out.stdout);
+                                    if let Ok(pct) = s.trim().parse::<u32>() {
+                                        if pct > 90 {
+                                            let alert = skyclaw_core::types::message::InboundMessage {
+                                                id: uuid::Uuid::new_v4().to_string(),
+                                                channel: "proactive".to_string(),
+                                                chat_id: alert_chat_id.clone(),
+                                                user_id: "system".to_string(),
+                                                username: None,
+                                                text: Some(format!(
+                                                    "🚨 ALERT: Memory {}% (threshold 90%)
+ps aux --sort=-%mem | head -10",
+                                                    pct
+                                                )),
+                                                attachments: vec![],
+                                                reply_to: None,
+                                                timestamp: chrono::Utc::now(),
+                                            };
+                                            let _ = alert_tx.send(alert).await;
+                                            last_mem_alert = Some(std::time::Instant::now());
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ── K3s pod crash check ─────────────────────────────────
+                            let k3s_ok = last_k3s_alert
+                                .map(|t| t.elapsed() < cooldown)
+                                .unwrap_or(false);
+                            if !k3s_ok {
+                                if let Ok(out) = tokio::process::Command::new("sh")
+                                    .arg("-c")
+                                    .arg("kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -E 'CrashLoop|Error|OOMKilled|Evicted' | head -5")
+                                    .output().await
+                                {
+                                    let s = String::from_utf8_lossy(&out.stdout);
+                                    let trimmed = s.trim();
+                                    if !trimmed.is_empty() {
+                                        let alert = skyclaw_core::types::message::InboundMessage {
+                                            id: uuid::Uuid::new_v4().to_string(),
+                                            channel: "proactive".to_string(),
+                                            chat_id: alert_chat_id.clone(),
+                                            user_id: "system".to_string(),
+                                            username: None,
+                                            text: Some(format!(
+                                                "🚨 ALERT: K3s pods in bad state:
+```
+{}
+```
+Investigate and remediate.",
+                                                trimmed
+                                            )),
+                                            attachments: vec![],
+                                            reply_to: None,
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        let _ = alert_tx.send(alert).await;
+                                        last_k3s_alert = Some(std::time::Instant::now());
+                                    }
+                                }
+                            }
+                        }
+                    }));
+                    tracing::info!("Proactive alert monitor started (CPU >85%, disk >80%, mem >90%, K3s crash pods)");
+                } else {
+                    tracing::info!("Proactive alerts disabled — set heartbeat.report_to in config to enable");
+                }
+            }
+
             // ── Per-chat serial executor ───────────────────────
 
             /// Tracks the active task state for a single chat.
@@ -2167,10 +2400,11 @@ async fn main() -> Result<()> {
 
                                     let interrupt_flag = Some(interrupt_clone.clone());
 
-                                    // ── Status watch — live tool progress → Telegram ──
-                                    // status_rx is NOT dropped: a background task watches
-                                    // phase transitions and forwards them to the chat as
-                                    // short status messages so the owner sees real-time progress.
+                                    // ── Status watch — typing + in-place progress editing ──
+                                    // Guard: skip entirely for heartbeat/proactive messages —
+                                    // those are background tasks, not user interactions.
+                                    // Only real user messages get the typing indicator and
+                                    // the live "⏳ Working..." status line.
                                     let (status_tx, status_rx) = tokio::sync::watch::channel(
                                         skyclaw_agent::AgentTaskStatus::default(),
                                     );
@@ -2179,19 +2413,48 @@ async fn main() -> Result<()> {
                                         let mut rx       = status_rx;
                                         let sender_s     = sender.clone();
                                         let cid          = msg.chat_id.clone();
+                                        let is_background = is_hb
+                                            || msg.channel == "proactive"
+                                            || msg.channel == "cron"
+                                            || msg.user_id == "system";
                                         tokio::spawn(async move {
                                             use skyclaw_agent::AgentTaskPhase;
-                                            // Track last phase to avoid duplicate messages
+
+                                            // Skip typing + status for background tasks
+                                            if is_background {
+                                                // Still drain the status channel so the agent
+                                                // doesn't block on a full watch buffer
+                                                while rx.changed().await.is_ok() {}
+                                                return;
+                                            }
+
+                                            // Show typing indicator immediately
+                                            let _ = sender_s.send_typing(&cid).await;
+
+                                            // Send the initial status message and keep its ID
+                                            let init_msg = skyclaw_core::types::message::OutboundMessage {
+                                                chat_id:    cid.clone(),
+                                                text:       "⏳ Working...".to_string(),
+                                                reply_to:   None,
+                                                parse_mode: None,
+                                            };
+                                            let status_msg_id = sender_s
+                                                .send_message_with_id(init_msg)
+                                                .await
+                                                .unwrap_or_default();
+
                                             let mut last_tool: Option<String> = None;
+                                            let mut lines: Vec<String> = vec!["⏳ Working...".to_string()];
+
                                             while rx.changed().await.is_ok() {
                                                 let phase = rx.borrow_and_update().phase.clone();
-                                                let text: Option<String> = match &phase {
+                                                let new_line: Option<String> = match &phase {
                                                     AgentTaskPhase::ExecutingTool {
                                                         tool_name, tool_index, tool_total, ..
                                                     } => {
                                                         let key = format!("{}-{}", tool_index, tool_name);
                                                         if last_tool.as_deref() == Some(&key) {
-                                                            None // skip duplicate
+                                                            None
                                                         } else {
                                                             last_tool = Some(key);
                                                             let emoji = match tool_name.as_str() {
@@ -2210,7 +2473,7 @@ async fn main() -> Result<()> {
                                                                 _                              => "🛠️",
                                                             };
                                                             Some(format!(
-                                                                "{} [{}/{}] {}...",
+                                                                "{} [{}/{}] {}",
                                                                 emoji,
                                                                 tool_index + 1,
                                                                 tool_total,
@@ -2226,14 +2489,32 @@ async fn main() -> Result<()> {
                                                     }
                                                     _ => None,
                                                 };
-                                                if let Some(t) = text {
-                                                    let status_msg = skyclaw_core::types::message::OutboundMessage {
-                                                        chat_id:    cid.clone(),
-                                                        text:       t,
-                                                        reply_to:   None,
-                                                        parse_mode: None,
-                                                    };
-                                                    let _ = sender_s.send_message(status_msg).await;
+
+                                                if let Some(line) = new_line {
+                                                    lines.push(line);
+                                                    // Keep at most 8 lines to stay within Telegram limits
+                                                    if lines.len() > 8 {
+                                                        lines.remove(0);
+                                                    }
+                                                    let updated = lines.join("
+");
+                                                    // Edit in-place if we have the message id,
+                                                    // otherwise fall back to sending a new message
+                                                    if !status_msg_id.is_empty() {
+                                                        let _ = sender_s
+                                                            .edit_message(&cid, &status_msg_id, &updated)
+                                                            .await;
+                                                    } else {
+                                                        let fallback = skyclaw_core::types::message::OutboundMessage {
+                                                            chat_id:    cid.clone(),
+                                                            text:       updated,
+                                                            reply_to:   None,
+                                                            parse_mode: None,
+                                                        };
+                                                        let _ = sender_s.send_message(fallback).await;
+                                                    }
+                                                    // Refresh typing indicator every tool call
+                                                    let _ = sender_s.send_typing(&cid).await;
                                                 }
                                             }
                                         });
@@ -2445,7 +2726,278 @@ async fn main() -> Result<()> {
                                         return;
                                     }
 
-                                    // /help — list available commands
+                                    // /provider [name] — show or switch active provider
+                                    if cmd_lower == "/provider" || cmd_lower.starts_with("/provider ") {
+                                        let args = if cmd_lower == "/provider" {
+                                            ""
+                                        } else {
+                                            msg_text_cmd.trim()["/provider".len()..].trim()
+                                        };
+
+                                        let reply_text = if args.is_empty() {
+                                            // Show current provider and list all configured
+                                            match load_credentials_file() {
+                                                None => "No providers configured. Use /addkey to add one.".to_string(),
+                                                Some(creds) if creds.providers.is_empty() => {
+                                                    "No providers configured. Use /addkey to add one.".to_string()
+                                                }
+                                                Some(creds) => {
+                                                    let mut lines = vec![format!("Active provider: {}", creds.active), String::new(), "Configured providers:".to_string()];
+                                                    for p in &creds.providers {
+                                                        let marker = if p.name == creds.active { " ← active" } else { "" };
+                                                        lines.push(format!("  {} (model: {}){}", p.name, p.model, marker));
+                                                    }
+                                                    lines.push(String::new());
+                                                    lines.push("Switch: /provider <name>".to_string());
+                                                    lines.join("\n")
+                                                }
+                                            }
+                                        } else {
+                                            // Switch to requested provider
+                                            let target = args.trim().to_lowercase();
+                                            match load_credentials_file() {
+                                                None => "No providers configured. Use /addkey to add one.".to_string(),
+                                                Some(mut creds) => {
+                                                    if !creds.providers.iter().any(|p| p.name == target) {
+                                                        let names: Vec<String> = creds.providers.iter().map(|p| p.name.clone()).collect();
+                                                        format!("Unknown provider '{}'.\nConfigured: {}", target, names.join(", "))
+                                                    } else if creds.active == target {
+                                                        format!("Already using provider '{}'.", target)
+                                                    } else {
+                                                        let old = creds.active.clone();
+                                                        creds.active = target.clone();
+                                                        let path = credentials_path();
+                                                        match toml::to_string_pretty(&creds) {
+                                                            Err(e) => format!("Failed to serialize credentials: {}", e),
+                                                            Ok(content) => {
+                                                                if let Err(e) = std::fs::write(&path, &content) {
+                                                                    format!("Failed to write credentials: {}", e)
+                                                                } else {
+                                                                    // Hot-reload agent with new provider
+                                                                    if let Some(prov) = creds.providers.iter().find(|p| p.name == target) {
+                                                                        let valid_keys: Vec<String> = prov.keys.iter()
+                                                                            .filter(|k| !is_placeholder_key(k))
+                                                                            .cloned().collect();
+                                                                        let effective_base_url = prov.base_url.clone().or_else(|| base_url.clone());
+                                                                        let reload_config = skyclaw_core::types::config::ProviderConfig {
+                                                                            name: Some(target.clone()),
+                                                                            api_key: valid_keys.first().cloned(),
+                                                                            keys: valid_keys,
+                                                                            model: Some(prov.model.clone()),
+                                                                            base_url: effective_base_url,
+                                                                            extra_headers: std::collections::HashMap::new(),
+                                                                        };
+                                                                        match validate_provider_key(&reload_config).await {
+                                                                            Ok(validated_provider) => {
+                                                                                let new_agent = Arc::new(skyclaw_agent::AgentRuntime::with_limits(
+                                                                                    validated_provider,
+                                                                                    memory.clone(),
+                                                                                    tools_template.clone(),
+                                                                                    prov.model.clone(),
+                                                                                    Some(build_system_prompt()),
+                                                                                    max_turns, max_ctx, max_rounds,
+                                                                                    max_task_duration, max_spend,
+                                                                                ).with_v2_optimizations(v2_opt));
+                                                                                *agent_state.write().await = Some(new_agent);
+                                                                                tracing::info!(from = %old, to = %target, "Provider switched via /provider");
+                                                                                format!("Provider switched: {} → {}\nModel: {}\nActive now.", old, target, prov.model)
+                                                                            }
+                                                                            Err(e) => {
+                                                                                // Revert
+                                                                                let mut rev = creds.clone();
+                                                                                rev.active = old.clone();
+                                                                                if let Ok(rc) = toml::to_string_pretty(&rev) {
+                                                                                    let _ = std::fs::write(&path, &rc);
+                                                                                }
+                                                                                format!("Provider switch failed: {}\nReverted to {}.", e, old)
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        "Provider saved but hot-reload skipped (provider not found).".to_string()
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        };
+
+                                        let reply = skyclaw_core::types::message::OutboundMessage {
+                                            chat_id: msg.chat_id.clone(),
+                                            text: reply_text,
+                                            reply_to: Some(msg.id.clone()),
+                                            parse_mode: None,
+                                        };
+                                        send_with_retry(&*sender, reply).await;
+                                        is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
+                                    // /opencode-model [model] — show or change OpenCode model
+                                    if cmd_lower == "/opencode-model" || cmd_lower.starts_with("/opencode-model ") {
+                                        let args = if cmd_lower == "/opencode-model" {
+                                            ""
+                                        } else {
+                                            msg_text_cmd.trim()["/opencode-model".len()..].trim()
+                                        };
+
+                                        let opencode_json_path = "/root/.config/opencode/opencode.json";
+
+                                        let reply_text = if args.is_empty() {
+                                            // Show current OpenCode model from JSON
+                                            match std::fs::read_to_string(opencode_json_path) {
+                                                Err(_) => format!(
+                                                    "OpenCode config not found at {}\nSet OPENCODE_MODEL env var or run opencode once to create it.",
+                                                    opencode_json_path
+                                                ),
+                                                Ok(content) => {
+                                                    match serde_json::from_str::<serde_json::Value>(&content) {
+                                                        Err(e) => format!("Failed to parse opencode.json: {}", e),
+                                                        Ok(json) => {
+                                                            let model = json.get("model")
+                                                                .and_then(|v| v.as_str())
+                                                                .unwrap_or("(not set)");
+                                                            format!("OpenCode model: {}\n\nChange: /opencode-model <model-name>\nExample: /opencode-model anthropic/claude-sonnet-4-6", model)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // Update OpenCode model in JSON
+                                            let new_model = args.trim().to_string();
+                                            let content = std::fs::read_to_string(opencode_json_path)
+                                                .unwrap_or_else(|_| "{}".to_string());
+                                            match serde_json::from_str::<serde_json::Value>(&content) {
+                                                Err(e) => format!("Failed to parse opencode.json: {}", e),
+                                                Ok(mut json) => {
+                                                    json["model"] = serde_json::Value::String(new_model.clone());
+                                                    match serde_json::to_string_pretty(&json) {
+                                                        Err(e) => format!("Failed to serialize opencode.json: {}", e),
+                                                        Ok(updated) => {
+                                                            // Ensure parent dir exists
+                                                            if let Some(parent) = std::path::Path::new(opencode_json_path).parent() {
+                                                                let _ = std::fs::create_dir_all(parent);
+                                                            }
+                                                            match std::fs::write(opencode_json_path, &updated) {
+                                                                Err(e) => format!("Failed to write opencode.json: {}", e),
+                                                                Ok(_) => {
+                                                                    tracing::info!(model = %new_model, "OpenCode model updated via /opencode-model");
+                                                                    format!(
+                                                                        "OpenCode model updated: {}\n\nopencode.json written. Restart opencode MCP to apply:\n/mcp restart opencode",
+                                                                        new_model
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        };
+
+                                        let reply = skyclaw_core::types::message::OutboundMessage {
+                                            chat_id: msg.chat_id.clone(),
+                                            text: reply_text,
+                                            reply_to: Some(msg.id.clone()),
+                                            parse_mode: None,
+                                        };
+                                        send_with_retry(&*sender, reply).await;
+                                        is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
+                                    // /status — live system health snapshot
+                                    if cmd_lower == "/status" {
+                                        let status_text = async {
+                                            let run = |cmd: &str| -> String {
+                                                std::process::Command::new("sh")
+                                                    .arg("-c").arg(cmd)
+                                                    .output()
+                                                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                                                    .unwrap_or_else(|_| "error".to_string())
+                                            };
+
+                                            // CPU (instant — just read /proc/stat once for a quick estimate)
+                                            let cpu = run("grep 'cpu ' /proc/stat | awk '{idle=$5; total=0; for(i=2;i<=NF;i++) total+=$i; printf "%.0f", 100-idle*100/total}'");
+                                            // Disk
+                                            let disk = run("df / | awk 'NR==2{print $5}'");
+                                            // Memory
+                                            let mem = run("free | awk '/^Mem:/{printf "%.0f%%  (%s used / %s total)", ($3/$2)*100, $3, $2}'");
+                                            // Uptime
+                                            let uptime = run("uptime -p 2>/dev/null || uptime");
+                                            // K3s pods
+                                            let k3s = run("kubectl get pods --all-namespaces --no-headers 2>/dev/null | wc -l");
+                                            let k3s_bad = run("kubectl get pods --all-namespaces --no-headers 2>/dev/null | grep -cE 'CrashLoop|Error|OOMKilled|Evicted' || echo 0");
+                                            // Load average
+                                            let load = run("cat /proc/loadavg | awk '{print $1, $2, $3}'");
+                                            // Alerts state
+                                            let alerts_state = if ALERTS_ENABLED.load(Ordering::Relaxed) { "on" } else { "off" };
+
+                                            format!(
+                                                "batabeto status
+
+CPU:     {}%
+Disk /:  {}
+Memory:  {}
+Load:    {}
+Uptime:  {}
+
+K3s pods total: {}
+K3s unhealthy:  {}
+
+Alerts: {} (toggle: /alerts on|off)",
+                                                cpu, disk, mem, load, uptime, k3s.trim(), k3s_bad.trim(), alerts_state
+                                            )
+                                        }.await;
+
+                                        let reply = skyclaw_core::types::message::OutboundMessage {
+                                            chat_id: msg.chat_id.clone(),
+                                            text: status_text,
+                                            reply_to: Some(msg.id.clone()),
+                                            parse_mode: None,
+                                        };
+                                        send_with_retry(&*sender, reply).await;
+                                        is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
+                                    // /alerts on|off — enable or disable proactive alert monitor
+                                    if cmd_lower == "/alerts" || cmd_lower.starts_with("/alerts ") {
+                                        let args = if cmd_lower == "/alerts" {
+                                            ""
+                                        } else {
+                                            msg_text_cmd.trim()["/alerts".len()..].trim()
+                                        };
+
+                                        let reply_text = match args {
+                                            "on" => {
+                                                ALERTS_ENABLED.store(true, Ordering::Relaxed);
+                                                tracing::info!("Proactive alerts enabled via /alerts on");
+                                                "Proactive alerts ON\nCPU >85%, disk >80%, mem >90%, K3s crashes will be reported.".to_string()
+                                            }
+                                            "off" => {
+                                                ALERTS_ENABLED.store(false, Ordering::Relaxed);
+                                                tracing::info!("Proactive alerts disabled via /alerts off");
+                                                "Proactive alerts OFF\nNo automatic alerts until you run /alerts on.".to_string()
+                                            }
+                                            _ => {
+                                                let state = if ALERTS_ENABLED.load(Ordering::Relaxed) { "on" } else { "off" };
+                                                format!("Proactive alerts are currently: {}\n\nUsage: /alerts on|off", state)
+                                            }
+                                        };
+
+                                        let reply = skyclaw_core::types::message::OutboundMessage {
+                                            chat_id: msg.chat_id.clone(),
+                                            text: reply_text,
+                                            reply_to: Some(msg.id.clone()),
+                                            parse_mode: None,
+                                        };
+                                        send_with_retry(&*sender, reply).await;
+                                        is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                        return;
+                                    }
+
+                                                                        // /help — list available commands
                                     if cmd_lower == "/help" {
                                         let help_text = format!("\
 batabeto {} — commit: {} — date: {}\n\n\
@@ -2455,13 +3007,19 @@ Available commands:\n\n\
 /addkey unsafe — Add an API key by pasting directly\n\
 /keys — List configured providers and active model\n\
 /model — Show current model and available models\n\
-/model <name> — Switch to a different model\n\
+/model <n> — Switch to a different model\n\
+/provider — Show active provider and all configured providers\n\
+/provider <n> — Switch to a different provider (hot reload)\n\
+/opencode-model — Show current OpenCode agent model\n\
+/opencode-model <n> — Change OpenCode model (run /mcp restart opencode after)\n\
 /removekey <provider> — Remove a provider's API key\n\
 /usage — Show token usage and cost summary\n\
 /mcp — List connected MCP servers and tools\n\
-/mcp add <name> <command-or-url> — Connect a new MCP server\n\
-/mcp remove <name> — Disconnect an MCP server\n\
-/mcp restart <name> — Restart an MCP server\n\
+/mcp add <n> <command-or-url> — Connect a new MCP server\n\
+/mcp remove <n> — Disconnect an MCP server\n\
+/mcp restart <n> — Restart an MCP server\n\
+/status — Live system health: CPU, disk, memory, K3s pods\n\
+/alerts on|off — Enable or disable proactive alert monitor\n\
 /restart — Restart batabeto (server mode only)\n\n\
 Just type a message to chat with the AI agent.",
                                             env!("CARGO_PKG_VERSION"),

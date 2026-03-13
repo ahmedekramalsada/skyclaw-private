@@ -51,9 +51,13 @@ audit_log = true
 #   "Remember my chat ID is 123456789"
 # Then hardcode it here: report_to = "123456789"
 [heartbeat]
-enabled = true
+enabled  = true
 interval = "15m"
 checklist = "HEARTBEAT.md"
+# report_to — YOUR Telegram chat ID (get it by messaging @userinfobot on Telegram)
+# Used for: heartbeat reports + proactive alerts (CPU/disk/mem/K3s crashes)
+# If not set here, set OWNER_CHAT_ID in your .env — same effect.
+# report_to = "123456789"
 
 # ── Cron ──────────────────────────────────────────────────────────────────────
 [cron]

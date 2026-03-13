@@ -94,53 +94,23 @@ fi
 header "STEP 2 — Building release binary"
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Add swap if RAM is low (< 3 GB) ─────────────────────────────────────────
-TOTAL_RAM_MB=$(free -m | awk '/^Mem:/ {print $2}')
-SWAP_FILE=/swapfile_batabeto_build
-
-if [[ "$TOTAL_RAM_MB" -lt 3072 ]]; then
-  warn "Low RAM detected (${TOTAL_RAM_MB} MB) — adding 2 GB swap for the build..."
-  if [[ ! -f "$SWAP_FILE" ]]; then
-    dd if=/dev/zero of="$SWAP_FILE" bs=1M count=2048 status=none
-    chmod 600 "$SWAP_FILE"
-    mkswap "$SWAP_FILE" >/dev/null
-    swapon "$SWAP_FILE"
-    ok "Swap enabled: 2 GB at $SWAP_FILE"
-  else
-    swapon "$SWAP_FILE" 2>/dev/null || true
-    ok "Existing swap enabled"
-  fi
-fi
-
-# ── Build one crate at a time (--jobs 1) ────────────────────────────────────
-# On 2 GB RAM, parallel Rust compilation OOMs and hangs.
-# --jobs 1          → one crate compiled at a time
-# CARGO_BUILD_JOBS  → respected by all cargo subcommands
-# RUSTFLAGS codegen-units=1 → single codegen unit per crate (less peak RAM, slower)
-# RUSTFLAGS opt-level=s     → optimize for size not speed (less RAM than opt-level=3)
-info "Building skyclaw in release mode — single-threaded to fit in 2 GB RAM..."
-info "This will take 20-40 minutes on a 2 GB server. Do not interrupt."
+# ── Build one crate at a time (-j1) ─────────────────────────────────────────
+# -j1 means one compilation job at a time — crates compile sequentially.
+# This is intentional: parallel Rust builds on small servers cause OOM kills
+# and mysterious hangs. Sequential is slower but always finishes.
+info "Building skyclaw in release mode (-j1, one crate at a time)..."
+info "This takes 20–40 min on a fresh server (incremental builds are much faster)."
 echo ""
 
 cd "$REPO_DIR"
 
-export CARGO_BUILD_JOBS=1
-export RUSTFLAGS="-C codegen-units=1 -C opt-level=s"
-
-# Stream output so you can see progress crate by crate
-cargo build --release --jobs 1 2>&1 | grep -E "Compiling|Finished|error|warning\[" || true
+# Stream progress — you see each crate as it compiles
+cargo build --release -j1 2>&1 | grep -E "^error|^warning|Compiling |Finished " || true
 
 if [[ ! -f "$REPO_DIR/target/release/skyclaw" ]]; then
   err "Build failed — binary not found at target/release/skyclaw"
 fi
 ok "Build complete: $(du -sh $REPO_DIR/target/release/skyclaw | cut -f1) binary"
-
-# ── Remove build swap ────────────────────────────────────────────────────────
-if [[ -f "$SWAP_FILE" ]]; then
-  swapoff "$SWAP_FILE" 2>/dev/null || true
-  rm -f "$SWAP_FILE"
-  ok "Build swap removed"
-fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 header "STEP 3 — Installing binary"
@@ -158,6 +128,7 @@ header "STEP 4 — Creating directories"
 for dir in \
   "$INSTALL_DIR" \
   "$INSTALL_DIR/workspace" \
+  "$INSTALL_DIR/workspace/cron" \
   "$INSTALL_DIR/skills" \
   "$INSTALL_DIR/vault" \
   "$INSTALL_DIR/backups" \
@@ -229,6 +200,7 @@ else
   warn "You MUST edit $ENV_FILE and set:"
   warn "  TELEGRAM_BOT_TOKEN=your-token-here"
   warn "  OPENROUTER_API_KEY=sk-or-v1-your-key-here"
+  warn "  OWNER_CHAT_ID=your-chat-id   (message @userinfobot on Telegram to get it)"
 fi
 
 # ── OpenCode config — point it at OpenRouter ─────────────────────────────────

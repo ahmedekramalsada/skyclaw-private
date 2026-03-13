@@ -34,6 +34,32 @@ pub trait Channel: Send + Sync {
     async fn delete_message(&self, _chat_id: &str, _message_id: &str) -> Result<(), SkyclawError> {
         Ok(())
     }
+
+    /// Show a "typing..." indicator while the agent is working.
+    /// Default no-op — meaningful only on real messaging platforms.
+    async fn send_typing(&self, _chat_id: &str) -> Result<(), SkyclawError> {
+        Ok(())
+    }
+
+    /// Edit an existing message in-place.
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _new_text: &str,
+    ) -> Result<(), SkyclawError> {
+        Ok(())
+    }
+
+    /// Send a message and return its platform message_id for later editing.
+    /// Default: send normally, return empty string (editing not supported).
+    async fn send_message_with_id(
+        &self,
+        msg: OutboundMessage,
+    ) -> Result<String, SkyclawError> {
+        self.send_message(msg).await?;
+        Ok(String::new())
+    }
 }
 
 /// Bi-directional file transfer sub-trait. Every messaging channel should implement this.
