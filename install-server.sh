@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# batabeto — Server Setup Script
-# Usage: sudo bash install-server.sh [--no-build]
-#
-# Mode:
-#   Full (default): Installs everything and BUILDS the binary on the server.
-#   Light (--no-build): Installs dependencies and services but SKIPS building.
-#                       Use this if you deploy via push.sh from your PC.
+# batabeto — Pure Server Setup Script
+# Usage: sudo bash install-server.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -15,11 +10,6 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/root/.skyclaw"
 BINARY_PATH="/usr/local/bin/skyclaw"
-NO_BUILD=false
-
-if [[ "${1:-}" == "--no-build" ]]; then
-  NO_BUILD=true
-fi
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -39,7 +29,7 @@ if [[ $EUID -ne 0 ]]; then
   err "Run as root: sudo bash install-server.sh"
 fi
 
-header "Server Setup Mode: $(if $NO_BUILD; then echo 'LIGHT (No Build)'; else echo 'FULL (With Build)'; fi)"
+header "Server Setup — Optimized for Local Build + Push"
 
 # ── Step 1: Core Dependencies ────────────────────────────────────────────────
 header "STEP 1 — Runtime Dependencies"
@@ -65,38 +55,11 @@ if ! command -v opencode &>/dev/null; then
 fi
 ok "opencode found"
 
-# ── Step 2: Build (Optional) ─────────────────────────────────────────────────
-if $NO_BUILD; then
-  header "STEP 2 — Skipping build (deploy via push.sh later)"
-else
-  header "STEP 2 — Building on server"
-  
-  if ! command -v cargo &>/dev/null; then
-    info "Installing Rust..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
-    source "$HOME/.cargo/env"
-  fi
-  
-  if ! command -v cc &>/dev/null; then
-    apt-get update && apt-get install -y build-essential
-  fi
-
-  # ── OpenSSL and pkg-config (Required for openssl-sys) ───────────────────────
-  info "Installing build dependencies (OpenSSL, pkg-config)..."
-  apt-get update && apt-get install -y libssl-dev pkg-config
-  cd "$REPO_DIR"
-  rm -f target/release/skyclaw
-  set -o pipefail
-  cargo build --release -j1 2>&1 | grep -E "^error|^warning|Compiling |Finished " || true
-  
-  if [[ -f "target/release/skyclaw" ]]; then
-    cp "target/release/skyclaw" "$BINARY_PATH"
-    chmod 755 "$BINARY_PATH"
-    ok "Build and install successful"
-  else
-    err "Build failed"
-  fi
-fi
+# ── Step 2 — Skipping Build ──────────────────────────────────────────────────
+header "STEP 2 — Skipping Build"
+info "This server will NOT compile SkyClaw."
+info "Please use push.sh from your local PC to upload the binary."
+ok "Server prepared for binary delivery."
 
 # ── Step 3: Directories & Files ──────────────────────────────────────────────
 header "STEP 3 — Filesystem Setup"
@@ -110,33 +73,41 @@ chmod 700 "$INSTALL_DIR" "$INSTALL_DIR/vault" "/root/.ssh"
 # Configs
 cp "$REPO_DIR/skyclaw.toml" "$INSTALL_DIR/skyclaw.toml"
 if [[ ! -f "$INSTALL_DIR/mcp.toml" ]]; then
-  cp "$REPO_DIR/deploy/mcp.toml" "$INSTALL_DIR/mcp.toml"
+  # Try deploy folder if available
+  if [[ -f "$REPO_DIR/deploy/mcp.toml" ]]; then
+    cp "$REPO_DIR/deploy/mcp.toml" "$INSTALL_DIR/mcp.toml"
+  fi
 fi
 ok "Configuration files initialized"
 
 # .env
 if [[ ! -f "$INSTALL_DIR/.env" ]]; then
-  cp "$REPO_DIR/.env.example" "$INSTALL_DIR/.env"
+  if [[ -f "$REPO_DIR/.env.example" ]]; then
+    cp "$REPO_DIR/.env.example" "$INSTALL_DIR/.env"
+  fi
   chmod 600 "$INSTALL_DIR/.env"
   ok ".env template created"
 fi
 
-# ── Step 4: Systemd ──────────────────────────────────────────────────────────
+# ── Step 4: Systemd Service ──────────────────────────────────────────────────
 header "STEP 4 — Service Setup"
 
 SERVICE_FILE="/etc/systemd/system/skyclaw.service"
-cp "$REPO_DIR/deploy/skyclaw.service" "$SERVICE_FILE"
-systemctl daemon-reload
-systemctl enable skyclaw
-ok "Service skyclaw enabled"
+if [[ -f "$REPO_DIR/deploy/skyclaw.service" ]]; then
+  cp "$REPO_DIR/deploy/skyclaw.service" "$SERVICE_FILE"
+  systemctl daemon-reload
+  systemctl enable skyclaw
+  ok "Service skyclaw enabled"
+else
+  warn "Service file not found at deploy/skyclaw.service — skipping service setup"
+fi
 
 # ── Final ────────────────────────────────────────────────────────────────────
 header "Setup Complete"
 
-if $NO_BUILD; then
-  info "Binary is NOT installed yet."
-  info "Run this on your LOCAL PC to finish deployment:"
-  info "  bash push.sh <this-server-ip>"
-else
-  info "Bot is ready. Start it with: systemctl start skyclaw"
-fi
+info "Server setup is finished. To complete installation:"
+info "1. Go to your local PC."
+info "2. Build local: bash install-local.sh"
+info "3. Push to this server: bash push.sh <ip-or-alias>"
+echo ""
+ok "SkyClaw ready for deployment."
