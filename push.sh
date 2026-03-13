@@ -49,14 +49,17 @@ fi
 ok "Local build complete: $(du -sh "$LOCAL_BINARY" | cut -f1)"
 
 # ── Step 2: Stop Service & Upload ────────────────────────────────────────────
-info "Stopping skyclaw on $REMOTE_DEST to avoid 'text file busy'..."
-ssh "$REMOTE_DEST" "systemctl stop skyclaw" || true
+info "Stopping skyclaw on $REMOTE_DEST..."
+ssh "$REMOTE_DEST" "sudo systemctl stop skyclaw" || true
 
-info "Uploading binary to $REMOTE_DEST:$REMOTE_PATH..."
-scp "$LOCAL_BINARY" "$REMOTE_DEST:$REMOTE_PATH"
-ok "Upload complete"
+info "Uploading binary to $REMOTE_DEST:$(env -S "echo /tmp/$BINARY_NAME")..."
+scp "$LOCAL_BINARY" "$REMOTE_DEST:/tmp/$BINARY_NAME"
+ok "Staging complete"
 
-# ── Step 3: Restart ──────────────────────────────────────────────────────────
-info "Restarting skyclaw on $REMOTE_DEST..."
-ssh "$REMOTE_DEST" "chmod +x $REMOTE_PATH && systemctl start skyclaw"
-ok "skyclaw is live on $REMOTE_DEST. Watch logs: ssh $REMOTE_DEST 'journalctl -fu skyclaw'"
+# ── Step 3: Deployment & Restart ─────────────────────────────────────────────
+info "Moving binary to $REMOTE_PATH and fixing permissions..."
+ssh "$REMOTE_DEST" "sudo mv /tmp/$BINARY_NAME $REMOTE_PATH && sudo chown root:root $REMOTE_PATH && sudo chmod +x $REMOTE_PATH"
+
+info "Starting skyclaw on $REMOTE_DEST..."
+ssh "$REMOTE_DEST" "sudo systemctl start skyclaw"
+ok "skyclaw is live on $REMOTE_DEST. Watch logs: ssh $REMOTE_DEST 'sudo journalctl -fu skyclaw'"
