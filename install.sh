@@ -85,9 +85,10 @@ ok "npx found"
 if ! command -v opencode &>/dev/null; then
   info "Installing opencode-ai (coding agent for MCP delegation)..."
   npm install -g opencode-ai --silent
-  ok "opencode installed: $(opencode --version 2>/dev/null || echo 'ok')"
+  ok "opencode installed"
 else
-  ok "opencode found: $(opencode --version 2>/dev/null || echo 'ok')"
+  CURRENT_VER=$(opencode --version 2>/dev/null || echo "unknown")
+  ok "opencode found: $CURRENT_VER"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

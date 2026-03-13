@@ -23,7 +23,7 @@ max_restart_attempts = 3
 name      = "opencode"
 transport = "stdio"
 command   = "npx"
-args      = ["-y", "opencode-mcp"]
+args      = ["-y", "opencode-mcp@latest"]
 
 # ── GitHub — repos, issues, PRs ──────────────────────────────────────────────
 # Read/write issues, open PRs, search code, view CI status, push commits.

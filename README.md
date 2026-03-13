@@ -336,6 +336,9 @@ Agent uses them to complete the task
 
 Config: `~/.skyclaw/mcp.toml`
 
+> [!NOTE]
+> **OpenCode Management**: SkyClaw now automatically manages the OpenCode server lifecycle. Running `start.sh` will ensure a single, clean instance of the OpenCode server is running on port 4096 before starting the main agent.
+
 ## Vision Support
 
 SkyClaw can see and understand images. Send a photo through any channel — the runtime automatically:

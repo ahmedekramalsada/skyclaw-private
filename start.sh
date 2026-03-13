@@ -99,8 +99,25 @@ if [[ $MISSING -eq 1 ]]; then
   exit 1
 fi
 
-# ── STEP 3 — Start service ───────────────────────────────────────────────────
-header "STEP 3 — Starting batabeto"
+# ── STEP 3 — Clean Slate & OpenCode Startup ──────────────────────────────────
+header "STEP 3 — Clean Slate & OpenCode Startup"
+
+info "Cleaning up stale opencode processes..."
+killall opencode-mcp opencode 2>/dev/null || true
+# Wait for port to clear
+sleep 1
+
+info "Starting OpenCode server on port 4096..."
+opencode serve --port 4096 > /tmp/opencode-startup.log 2>&1 &
+sleep 2
+
+if ! lsof -i :4096 >/dev/null; then
+  err "OpenCode server failed to start on port 4096. Check /tmp/opencode-startup.log"
+fi
+ok "OpenCode server is running on port 4096"
+
+# ── STEP 4 — Start service ───────────────────────────────────────────────────
+header "STEP 4 — Starting batabeto"
 
 # If already running, restart instead
 if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
