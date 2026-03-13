@@ -19,6 +19,12 @@ if [[ -z "$TARGET" ]]; then
   exit 1
 fi
 
+REMOTE_DEST="$TARGET"
+# If no user is specified (no @), default to root@ for deployment
+if [[ "$TARGET" != *"@"* ]]; then
+  REMOTE_DEST="root@$TARGET"
+fi
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINARY_NAME="skyclaw"
 LOCAL_BINARY="$REPO_DIR/target/release/$BINARY_NAME"
@@ -42,18 +48,15 @@ if [[ ! -f "$LOCAL_BINARY" ]]; then
 fi
 ok "Local build complete: $(du -sh "$LOCAL_BINARY" | cut -f1)"
 
-# ── Step 2: Upload ───────────────────────────────────────────────────────────
-REMOTE_DEST="$TARGET"
-# If it's a naked IP (no @), default to root@
-if [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  REMOTE_DEST="root@$TARGET"
-fi
+# ── Step 2: Stop Service & Upload ────────────────────────────────────────────
+info "Stopping skyclaw on $REMOTE_DEST to avoid 'text file busy'..."
+ssh "$REMOTE_DEST" "systemctl stop skyclaw" || true
 
 info "Uploading binary to $REMOTE_DEST:$REMOTE_PATH..."
 scp "$LOCAL_BINARY" "$REMOTE_DEST:$REMOTE_PATH"
 ok "Upload complete"
 
 # ── Step 3: Restart ──────────────────────────────────────────────────────────
-info "Restarting $BINARY_NAME service on server..."
-ssh "$REMOTE_DEST" "chmod +x $REMOTE_PATH && systemctl restart skyclaw"
-ok "$BINARY_NAME is restarting on $REMOTE_DEST. Watch logs with: ssh $REMOTE_DEST 'journalctl -fu skyclaw'"
+info "Restarting skyclaw on $REMOTE_DEST..."
+ssh "$REMOTE_DEST" "chmod +x $REMOTE_PATH && systemctl start skyclaw"
+ok "skyclaw is live on $REMOTE_DEST. Watch logs: ssh $REMOTE_DEST 'journalctl -fu skyclaw'"
