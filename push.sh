@@ -25,8 +25,9 @@ if [[ -z "$TARGET" ]]; then
 fi
 
 REMOTE_DEST="$TARGET"
-# If no user is specified (no @), default to root@ for deployment
-if [[ "$TARGET" != *"@"* ]]; then
+# Only add root@ if the target looks like a raw IP address and has no user specified.
+# SSH aliases (like "x") already have user/host defined in ~/.ssh/config — don't touch them.
+if [[ "$TARGET" != *"@"* ]] && [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   REMOTE_DEST="root@$TARGET"
 fi
 
