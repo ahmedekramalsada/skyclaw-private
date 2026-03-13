@@ -804,7 +804,7 @@ Rules:\n\
 - Reply in same language owner writes in\n\n\
 ═══ MEMORY — TOPIC-SCOPED ═══\n\
 Memory tool: memory_manage. Actions: remember / recall / forget / update / list.\n\
-Use tags=[] to scope entries by topic. Use scope="global" for all cross-session facts.\n\n\
+Use tags=[] to scope entries by topic. Use scope=\"global\" for all cross-session facts.\n\n\
 TOPICS — always pass as a tag (use exactly these strings):\n\
   servers       — IPs, SSH users, hostnames, what each server runs\n\
   kubernetes    — kubeconfigs, namespaces, deployments, K3s specifics\n\
@@ -817,18 +817,18 @@ TOPICS — always pass as a tag (use exactly these strings):\n\
   mcp           — MCP servers installed, why, what they do\n\
   github        — repos, branches, deploy keys, CI patterns\n\n\
 STORING — always include the topic tag:\n\
-  action: remember  key: "server1"  content: "10.0.0.5, root, runs nginx"  tags: ["servers"]  scope: "global"\n\
+  action: remember  key: \"server1\"  content: \"10.0.0.5, root, runs nginx\"  tags: [\"servers\"]  scope: \"global\"\n\
   Confirm: '🧠 Remembered [servers]: <summary>'\n\n\
 RECALLING — always filter by tag before starting any task:\n\
-  action: recall  query: "server1"  tags: ["servers"]  scope: "global"\n\
-  action: recall  query: "k3s namespace"  tags: ["kubernetes"]  scope: "global"\n\
+  action: recall  query: \"server1\"  tags: [\"servers\"]  scope: \"global\"\n\
+  action: recall  query: \"k3s namespace\"  tags: [\"kubernetes\"]  scope: \"global\"\n\
   ALWAYS pull topic memories BEFORE calling any tool — context first, then execute.\n\n\
 FORGETTING:\n\
-  action: forget  key: "server1"  scope: "global"\n\
+  action: forget  key: \"server1\"  scope: \"global\"\n\
   Confirm: '🗑️ Forgot: server1'\n\n\
 RULES:\n\
 - Store IMMEDIATELY when owner mentions a server, service, preference, or incident.\n\
-- Never store raw credentials — store references ("vault:openrouter_key") not values.\n\
+- Never store raw credentials — store references (\"vault:openrouter_key\") not values.\n\
 - 'remember X' → action=remember + correct tag → confirm: '🧠 Remembered [tag]: X'\n\
 - 'forget X' → action=forget by key → confirm: '🗑️ Forgot: X'\n\n\
 ═══ SCHEDULED TASKS (CRON) ═══\n\
@@ -838,11 +838,11 @@ When asked to schedule something:\n\
 1. Parse into a cron expression (e.g. '0 8 * * *' for 8am daily)\n\
 2. Write script to /root/.skyclaw/workspace/cron/<task-name>.sh\n\
 3. Register: (crontab -l 2>/dev/null; echo '<expr> bash /root/.skyclaw/workspace/cron/<task-name>.sh >> /root/.skyclaw/workspace/cron/<task-name>.log 2>&1') | crontab -\n\
-4. Store: action=remember  key="cron-<task>"  content="<what/when/path>"  tags=["cron"]  scope="global"\n\
+4. Store: action=remember  key=\"cron-<task>\"  content=\"<what/when/path>\"  tags=[\"cron\"]  scope=\"global\"\n\
 5. Confirm: '⏰ Scheduled: <description> (<cron-expr>)'\n\n\
 Managing schedules:\n\
-- 'show my scheduled tasks' → crontab -l + action=recall  tags=["cron"]\n\
-- 'cancel <task>' → remove from crontab + delete script + action=forget  key="cron-<task>"\n\
+- 'show my scheduled tasks' → crontab -l + action=recall  tags=[\"cron\"]\n\
+- 'cancel <task>' → remove from crontab + delete script + action=forget  key=\"cron-<task>\"\n\
 - 'run <task> now' → execute the script immediately, report result\n\n\
 ═══ SELF-MANAGEMENT ═══\n\n\
 ── CREATING SKILLS ──\n\
@@ -2155,7 +2155,7 @@ du -sh /* | sort -rh | head -10",
                             if !mem_ok {
                                 if let Ok(out) = tokio::process::Command::new("sh")
                                     .arg("-c")
-                                    .arg("free | awk '/^Mem:/{printf "%.0f", ($3/$2)*100}'")
+                                    .arg("free | awk '/^Mem:/{printf \"%.0f\", ($3/$2)*100}'")
                                     .output().await
                                 {
                                     let s = String::from_utf8_lossy(&out.stdout);
@@ -2918,11 +2918,11 @@ Investigate and remediate.",
                                             };
 
                                             // CPU (instant — just read /proc/stat once for a quick estimate)
-                                            let cpu = run("grep 'cpu ' /proc/stat | awk '{idle=$5; total=0; for(i=2;i<=NF;i++) total+=$i; printf "%.0f", 100-idle*100/total}'");
+                                            let cpu = run("grep 'cpu ' /proc/stat | awk '{idle=$5; total=0; for(i=2;i<=NF;i++) total+=$i; printf \"%.0f\", 100-idle*100/total}'");
                                             // Disk
                                             let disk = run("df / | awk 'NR==2{print $5}'");
                                             // Memory
-                                            let mem = run("free | awk '/^Mem:/{printf "%.0f%%  (%s used / %s total)", ($3/$2)*100, $3, $2}'");
+                                            let mem = run("free | awk '/^Mem:/{printf \"%.0f%%  (%s used / %s total)\", ($3/$2)*100, $3, $2}'");
                                             // Uptime
                                             let uptime = run("uptime -p 2>/dev/null || uptime");
                                             // K3s pods
