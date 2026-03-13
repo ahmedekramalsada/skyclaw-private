@@ -1764,6 +1764,8 @@ async fn main() -> Result<()> {
             // If we resolved credentials from skyclaw.toml env vars but
             // credentials.toml is empty/missing, write them now so that
             // /model, /keys, and all Telegram management commands work.
+            // We use model = "" to signal "no model chosen yet" — the user
+            // will be prompted on first message.
             if let Some((ref pname, ref pkey, ref pmodel)) = credentials {
                 if !is_placeholder_key(pkey) {
                     let existing = load_credentials_file();
@@ -1772,12 +1774,23 @@ async fn main() -> Result<()> {
                             || !c.providers.iter().any(|p| p.name == *pname)
                     });
                     if needs_bootstrap {
+                        // Use the configured model if explicitly set in skyclaw.toml,
+                        // otherwise use "" to trigger model selection prompt on first message.
+                        let bootstrap_model = if pmodel.is_empty()
+                            || pmodel == default_model(pname)
+                        {
+                            // No explicit model chosen → empty = user picks via Telegram
+                            ""
+                        } else {
+                            pmodel.as_str()
+                        };
                         tracing::info!(
                             provider = %pname,
+                            model = %bootstrap_model,
                             "Bootstrapping credentials.toml from env-var config"
                         );
                         if let Err(e) =
-                            save_credentials(pname, pkey, pmodel, None).await
+                            save_credentials(pname, pkey, bootstrap_model, None).await
                         {
                             tracing::warn!(error = %e, "Failed to bootstrap credentials.toml");
                         }
@@ -3380,6 +3393,50 @@ Just type a message to chat with the AI agent.",
                                     };
 
                                     if let Some(agent) = agent {
+                                        // ── Check if a model has been chosen yet ────────
+                                        // Model is "" when bootstrapped from env-var with no
+                                        // explicit model in skyclaw.toml. Ask user to pick one.
+                                        let current_model = load_credentials_file()
+                                            .and_then(|c| {
+                                                c.providers
+                                                    .into_iter()
+                                                    .find(|p| p.name == c.active)
+                                                    .map(|p| p.model)
+                                            })
+                                            .unwrap_or_default();
+
+                                        let msg_text_check = msg.text.as_deref().unwrap_or("");
+                                        let is_model_cmd = msg_text_check.trim().starts_with("/model");
+
+                                        if current_model.is_empty() && !is_model_cmd {
+                                            let reply = skyclaw_core::types::message::OutboundMessage {
+                                                chat_id: msg.chat_id.clone(),
+                                                text: "✅ API key is configured!\n\n\
+                                                    Please choose a model before we start:\n\
+                                                    /model <model-name>\n\n\
+                                                    Free models you can use right now:\n\
+                                                    • /model google/gemini-2.0-flash-exp:free\n\
+                                                    • /model deepseek/deepseek-chat:free\n\
+                                                    • /model meta-llama/llama-3.3-70b-instruct:free\n\
+                                                    • /model mistralai/mistral-small-3.1-24b-instruct:free\n\n\
+                                                    Or any paid model:\n\
+                                                    • /model anthropic/claude-sonnet-4-5\n\
+                                                    • /model openai/gpt-4o\n\n\
+                                                    OpenRouter: https://openrouter.ai/models"
+                                                    .to_string(),
+                                                reply_to: Some(msg.id.clone()),
+                                                parse_mode: None,
+                                            };
+                                            send_with_retry(&*sender, reply).await;
+
+                                            is_heartbeat_clone.store(false, Ordering::Relaxed);
+                                            interrupt_clone.store(false, Ordering::Relaxed);
+                                            if let Ok(mut pq) = pending_for_worker.lock() {
+                                                pq.remove(&worker_chat_id);
+                                            }
+                                            return;
+                                        }
+
                                         // ── Detect new API key mid-conversation ────
                                         let msg_text_peek = msg.text.as_deref().unwrap_or("");
                                         if let Some(cred) = detect_api_key(msg_text_peek) {
