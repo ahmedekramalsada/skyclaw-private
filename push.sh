@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # batabeto — Push Binary to Server
-# Usage: bash push.sh <target>
+# Usage: bash push.sh <target> [-c]
 #
 # <target> can be an IP address (e.g. 1.2.3.4) or an SSH alias (e.g. x).
-# This script builds the binary locally and uploads it to the server.
-# Use this to skip the long compilation time on the server itself.
+# Use -c to also push the skyclaw.toml configuration file.
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 TARGET="${1:-}"
+SYNC_CONFIG=false
+
+# Simple flag detection
+if [[ "${2:-}" == "-c" ]]; then
+  SYNC_CONFIG=true
+fi
 
 if [[ -z "$TARGET" ]]; then
   echo -e "Usage: bash push.sh <target>"
@@ -59,6 +64,13 @@ ok "Staging complete"
 # ── Step 3: Deployment & Restart ─────────────────────────────────────────────
 info "Moving binary to $REMOTE_PATH and fixing permissions..."
 ssh "$REMOTE_DEST" "sudo mv /tmp/$BINARY_NAME $REMOTE_PATH && sudo chown root:root $REMOTE_PATH && sudo chmod +x $REMOTE_PATH"
+
+if [[ "$SYNC_CONFIG" == "true" ]]; then
+  info "Syncing skyclaw.toml to $REMOTE_DEST..."
+  scp "$REPO_DIR/skyclaw.toml" "$REMOTE_DEST:/tmp/skyclaw.toml"
+  ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw.toml /root/.skyclaw/skyclaw.toml && sudo chown root:root /root/.skyclaw/skyclaw.toml"
+  ok "Config synced"
+fi
 
 info "Starting skyclaw on $REMOTE_DEST..."
 ssh "$REMOTE_DEST" "sudo systemctl start skyclaw"

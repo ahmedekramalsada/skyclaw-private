@@ -12,13 +12,9 @@ host = "127.0.0.1"
 port = 8080
 tls = false
 
-# ── Provider ──────────────────────────────────────────────────────────────────
-# OpenRouter — paste your sk-or-v1-... key via Telegram on first run.
-# Or hardcode here:
-api_key = "${OPENROUTER_API_KEY}"
 [provider]
 name = "openrouter"
-model = "anthropic/claude-sonnet-4-6"
+api_key = "${OPENROUTER_API_KEY}"
 
 # ── Memory ────────────────────────────────────────────────────────────────────
 [memory]
