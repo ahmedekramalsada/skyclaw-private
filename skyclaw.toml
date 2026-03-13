@@ -15,7 +15,7 @@ tls = false
 # ── Provider ──────────────────────────────────────────────────────────────────
 # OpenRouter — paste your sk-or-v1-... key via Telegram on first run.
 # Or hardcode here:
-# api_key = "sk-or-v1-YOUR_KEY_HERE"
+api_key = "${OPENROUTER_API_KEY}"
 [provider]
 name = "openrouter"
 model = "anthropic/claude-sonnet-4-6"
