@@ -81,7 +81,9 @@ else
     apt-get update && apt-get install -y build-essential
   fi
 
-  info "Compiling skyclaw..."
+  # ── OpenSSL and pkg-config (Required for openssl-sys) ───────────────────────
+  info "Installing build dependencies (OpenSSL, pkg-config)..."
+  apt-get update && apt-get install -y libssl-dev pkg-config
   cd "$REPO_DIR"
   rm -f target/release/skyclaw
   set -o pipefail

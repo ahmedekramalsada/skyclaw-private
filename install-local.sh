@@ -42,6 +42,16 @@ if ! command -v cc &>/dev/null; then
 fi
 ok "Linker found."
 
+# ── Step 1.1: OpenSSL & pkg-config (Linux only) ──────────────────────────────
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+  info "Checking for OpenSSL development headers..."
+  if ! dpkg -s libssl-dev &>/dev/null || ! command -v pkg-config &>/dev/null; then
+    warn "OpenSSL headers or pkg-config missing. Installing..."
+    sudo apt update && sudo apt install -y libssl-dev pkg-config
+  fi
+  ok "Build dependencies (OpenSSL/pkg-config) ready."
+fi
+
 # ── Step 2: Build ────────────────────────────────────────────────────────────
 info "Building skyclaw locally..."
 cd "$REPO_DIR"
