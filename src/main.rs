@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Global flag — toggled by /alerts on|off command.
 /// Checked by the proactive alert monitor before sending any alert.
