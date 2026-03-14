@@ -84,6 +84,14 @@ echo ""
 # ── Step 1: Build locally (unless --no-build) ────────────────────────────────
 if [[ "$DO_BUILD" == "true" ]]; then
   info "Building $BINARY_NAME locally in release mode..."
+
+  # Source cargo env — handle both normal and sudo cases
+  source "$HOME/.cargo/env" 2>/dev/null || true
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    REAL_HOME=$(eval echo "~$SUDO_USER")
+    source "$REAL_HOME/.cargo/env" 2>/dev/null || true
+  fi
+
   cd "$REPO_DIR"
   cargo build --release
 

@@ -34,6 +34,13 @@ echo ""
 # ── Step 1: Check dependencies ───────────────────────────────────────────────
 info "Checking build dependencies..."
 
+# Source cargo env — handle both normal and sudo cases
+source "$HOME/.cargo/env" 2>/dev/null || true
+if [[ -n "${SUDO_USER:-}" ]]; then
+  REAL_HOME=$(eval echo "~$SUDO_USER")
+  source "$REAL_HOME/.cargo/env" 2>/dev/null || true
+fi
+
 if ! command -v cargo &>/dev/null; then
   warn "Rust/cargo not found. Installing via rustup..."
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
