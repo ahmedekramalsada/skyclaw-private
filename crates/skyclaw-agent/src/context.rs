@@ -597,7 +597,7 @@ fn build_system_prompt(
     custom.map(|s| s.to_string()).or_else(|| {
         let tool_names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
         Some(format!(
-            "You are SkyClaw, a cloud-native AI agent runtime. You control a computer through messaging apps.\n\
+            "You are batabeto, a personal DevOps AI agent. Your owner is a DevOps engineer. You control a computer through messaging apps.\n\
              \n\
              You have access to these tools: {}\n\
              \n\
@@ -688,7 +688,7 @@ mod tests {
         )
         .await;
         assert!(req.system.is_some());
-        assert!(req.system.unwrap().contains("SkyClaw"));
+        assert!(req.system.unwrap().contains("batabeto"));
     }
 
     #[tokio::test]

@@ -219,7 +219,7 @@ impl<'a> SystemPromptBuilder<'a> {
     fn section_identity(&self) -> PromptSection {
         PromptSection {
             name: "identity",
-            text: "You are SkyClaw, a cloud-native AI agent. You control a computer via messaging apps.".to_string(),
+            text: "You are batabeto, a personal DevOps AI agent. Your owner is a DevOps engineer. You control a computer via messaging apps.".to_string(),
         }
     }
 
@@ -466,7 +466,7 @@ mod tests {
     fn builder_no_tools_excludes_tool_sections() {
         let prompt = SystemPromptBuilder::new().workspace(&workspace()).build();
 
-        assert!(prompt.contains("SkyClaw"));
+        assert!(prompt.contains("batabeto"));
         // No "Available tools" line when tools is empty
         assert!(!prompt.contains("Available tools:"));
         // No tool guidelines section
@@ -540,7 +540,7 @@ mod tests {
         let prompt = SystemPromptBuilder::new().workspace(&workspace()).build();
 
         // Identity
-        assert!(prompt.contains("SkyClaw"));
+        assert!(prompt.contains("batabeto"));
         // Workspace
         assert!(prompt.contains("/tmp/skyclaw-test"));
         // General guidelines
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn builder_without_workspace() {
         let prompt = SystemPromptBuilder::new().build();
-        assert!(prompt.contains("SkyClaw"));
+        assert!(prompt.contains("batabeto"));
         // No workspace line
         assert!(!prompt.contains("Workspace:"));
     }
@@ -565,7 +565,7 @@ mod tests {
     fn optimized_prompt_smaller_than_original() {
         // Reproduce the original (verbose) system prompt from context.rs
         let original = "\
-You are SkyClaw, a cloud-native AI agent runtime. You control a computer through messaging apps.\n\
+You are batabeto, a personal DevOps AI agent. Your owner is a DevOps engineer. You control a computer through messaging apps.\n\
 \n\
 You have access to these tools: shell, browser, file_read, file_write, send_file, web_fetch\n\
 \n\
@@ -686,7 +686,7 @@ If an approach fails repeatedly, do NOT retry the same way:\n\
 
         let prompt = build_system_prompt(&config, &tools, &workspace(), false);
 
-        assert!(prompt.contains("SkyClaw"));
+        assert!(prompt.contains("batabeto"));
         assert!(prompt.contains("Available tools: shell"));
         assert!(!prompt.contains("DONE criteria"));
     }
@@ -751,7 +751,7 @@ If an approach fails repeatedly, do NOT retry the same way:\n\
     fn default_builder_produces_valid_prompt() {
         let builder = SystemPromptBuilder::default();
         let prompt = builder.build();
-        assert!(prompt.contains("SkyClaw"));
+        assert!(prompt.contains("batabeto"));
     }
 
     // -- Security: no secrets leak ------------------------------------------
@@ -805,7 +805,7 @@ If an approach fails repeatedly, do NOT retry the same way:\n\
             .prompt_tier(PromptTier::Minimal)
             .build();
 
-        assert!(prompt.contains("SkyClaw"));
+        assert!(prompt.contains("batabeto"));
         assert!(!prompt.contains("Available tools:"));
         assert!(!prompt.contains("Verification"));
         assert!(!prompt.contains("Self-correction"));
@@ -822,7 +822,7 @@ If an approach fails repeatedly, do NOT retry the same way:\n\
             .prompt_tier(PromptTier::Basic)
             .build();
 
-        assert!(prompt.contains("SkyClaw"));
+        assert!(prompt.contains("batabeto"));
         assert!(prompt.contains("Available tools:"));
         assert!(!prompt.contains("Verification"));
         assert!(!prompt.contains("Self-correction"));

@@ -51,7 +51,7 @@ impl TaskDifficulty {
     }
 }
 
-const CLASSIFY_SYSTEM_PROMPT: &str = r#"You are SkyClaw, an AI assistant. Classify the user's message and respond with ONLY a valid JSON object. No markdown, no explanation — just the JSON.
+const CLASSIFY_SYSTEM_PROMPT: &str = r#"You are batabeto, a personal DevOps AI agent. Your owner is a DevOps engineer. Classify the user's message and respond with ONLY a valid JSON object. No markdown, no explanation — just the JSON.
 
 Categories:
 - "chat": Conversational — greetings, knowledge questions, opinions, thanks, casual talk. You provide a complete helpful response.
