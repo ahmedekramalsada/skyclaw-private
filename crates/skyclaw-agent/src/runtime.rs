@@ -402,8 +402,12 @@ impl AgentRuntime {
                     );
 
                     match classification.category {
-                        crate::llm_classifier::MessageCategory::Chat => {
-                            // ── Chat: return immediately ─────────────────
+                        crate::llm_classifier::MessageCategory::Chat
+                        | crate::llm_classifier::MessageCategory::Clarify => {
+                            // ── Chat / Clarify: return immediately ────────
+                            // For Clarify, the chat_text contains a question
+                            // with BUTTONS: line — the Telegram channel will
+                            // parse it into an inline keyboard.
                             // Push assistant reply to history for persistence.
                             session.history.push(ChatMessage {
                                 role: Role::Assistant,
@@ -792,12 +796,15 @@ impl AgentRuntime {
                     let tname = tool_name.clone();
                     let tidx = tool_index as u32;
                     let ttotal = tool_total;
+                    // Extract a brief detail string from tool arguments
+                    let detail = extract_tool_detail(tool_name, arguments);
                     tx.send_modify(|s| {
                         s.phase = AgentTaskPhase::ExecutingTool {
                             round: rounds as u32,
                             tool_name: tname,
                             tool_index: tidx,
                             tool_total: ttotal,
+                            detail,
                         };
                     });
                 }
@@ -1057,6 +1064,87 @@ impl AgentRuntime {
     pub fn max_task_duration(&self) -> Duration {
         self.max_task_duration
     }
+}
+
+/// Extract a brief detail string from tool call arguments for status display.
+///
+/// Returns `None` if no meaningful detail can be extracted. The returned string
+/// is short (truncated to ~60 chars) to fit nicely in Telegram status messages.
+fn extract_tool_detail(tool_name: &str, arguments: &serde_json::Value) -> Option<String> {
+    let map = arguments.as_object()?;
+
+    let detail = match tool_name {
+        "file_read" | "file_write" | "file_list" | "file_edit" | "file_create" => {
+            // Show the file path
+            map.get("path")
+                .or_else(|| map.get("file"))
+                .or_else(|| map.get("file_path"))
+                .or_else(|| map.get("directory"))
+                .and_then(|v| v.as_str())
+                .map(|p| {
+                    // Show just the filename or last path component for brevity
+                    let basename = std::path::Path::new(p)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(p);
+                    basename.to_string()
+                })
+        }
+        "shell" => {
+            // Show the command (truncated)
+            map.get("command")
+                .or_else(|| map.get("cmd"))
+                .and_then(|v| v.as_str())
+                .map(|cmd| {
+                    if cmd.len() > 50 {
+                        format!("{}…", &cmd[..50])
+                    } else {
+                        cmd.to_string()
+                    }
+                })
+        }
+        "web_fetch" => {
+            map.get("url")
+                .and_then(|v| v.as_str())
+                .map(|u| {
+                    if u.len() > 50 {
+                        format!("{}…", &u[..50])
+                    } else {
+                        u.to_string()
+                    }
+                })
+        }
+        "send_message" => {
+            map.get("text")
+                .and_then(|v| v.as_str())
+                .map(|t| {
+                    if t.len() > 40 {
+                        format!("{}…", &t[..40])
+                    } else {
+                        t.to_string()
+                    }
+                })
+        }
+        "memory_manage" => {
+            map.get("action")
+                .and_then(|v| v.as_str())
+                .map(|a| a.to_string())
+        }
+        "git" => {
+            map.get("action")
+                .or_else(|| map.get("command"))
+                .and_then(|v| v.as_str())
+                .map(|a| a.to_string())
+        }
+        "browser" => {
+            map.get("action")
+                .and_then(|v| v.as_str())
+                .map(|a| a.to_string())
+        }
+        _ => None,
+    };
+
+    detail
 }
 
 /// Check whether a model supports vision (image) inputs.

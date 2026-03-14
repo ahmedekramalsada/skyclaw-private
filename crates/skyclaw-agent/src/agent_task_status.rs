@@ -26,6 +26,8 @@ pub enum AgentTaskPhase {
         tool_name: String,
         tool_index: u32,
         tool_total: u32,
+        /// Optional brief description of what the tool is doing (e.g. file path, command).
+        detail: Option<String>,
     },
     /// Agent loop exited — building final reply.
     Finishing,
@@ -112,6 +114,7 @@ mod tests {
                 tool_name: "shell".to_string(),
                 tool_index: 1,
                 tool_total: 3,
+                detail: None,
             },
             AgentTaskPhase::Finishing,
             AgentTaskPhase::Done,

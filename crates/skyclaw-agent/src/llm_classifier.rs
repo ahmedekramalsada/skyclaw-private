@@ -27,6 +27,8 @@ pub struct MessageClassification {
 pub enum MessageCategory {
     Chat,
     Order,
+    /// The request is ambiguous or missing info — ask a clarifying question.
+    Clarify,
 }
 
 /// Difficulty level for order messages, maps to execution profiles.
@@ -53,7 +55,15 @@ const CLASSIFY_SYSTEM_PROMPT: &str = r#"You are SkyClaw, an AI assistant. Classi
 
 Categories:
 - "chat": Conversational — greetings, knowledge questions, opinions, thanks, casual talk. You provide a complete helpful response.
-- "order": The user wants you to DO something — open, create, search, fix, write, build, run, find, download, deploy, browse, etc.
+- "clarify": The request is ambiguous, missing critical info, or complex enough that you could do the WRONG thing without more details. You ask a clarifying question with suggested options.
+- "order": The user wants you to DO something and the request is clear enough to execute — open, create, search, fix, write, build, run, find, download, deploy, browse, etc.
+
+When to use "clarify" (IMPORTANT — use this generously):
+- The request is genuinely ambiguous (e.g. "fix the issue" — which issue?)
+- Critical info is missing (e.g. "deploy to the server" — which server? which service?)
+- The task is complex/multi-step and you need context to do it right (e.g. "set up monitoring" — what to monitor?)
+- The request involves destructive actions (e.g. "delete the database" — which one? are you sure?)
+Do NOT clarify for simple, obvious tasks (e.g. "check disk space", "show running containers").
 
 Difficulty (for orders only):
 - "simple": Single step, straightforward task
@@ -65,8 +75,12 @@ Response format:
 
 Rules:
 - For "chat": chat_text = your complete, helpful answer to the user.
+- For "clarify": chat_text = your question with 2-4 specific options as inline buttons. End with a BUTTONS line.
+  Format: "<your question>\nBUTTONS: Option 1 | Option 2 | Option 3 | ✏️ Other"
+  Example: "Which server should I deploy to?\nBUTTONS: Production | Staging | Dev | ✏️ Other"
+  Always include "✏️ Other" as the last button.
 - For "order": chat_text = brief natural acknowledgment (1-2 sentences, e.g. "Let me search for that!" or "On it, opening YouTube now.").
-- difficulty is only meaningful for "order". For "chat", always use "simple".
+- difficulty is only meaningful for "order". For "chat" and "clarify", always use "simple".
 - Respond in the SAME LANGUAGE as the user's message."#;
 
 /// Classify a user message using a fast LLM call.
@@ -188,6 +202,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_clarify_classification() {
+        let json = r#"{"category":"clarify","chat_text":"Which server should I deploy to?\nBUTTONS: Production | Staging | Dev | ✏️ Other","difficulty":"simple"}"#;
+        let result = parse_classification(json).unwrap();
+        assert_eq!(result.category, MessageCategory::Clarify);
+        assert!(result.chat_text.contains("BUTTONS:"));
+        assert_eq!(result.difficulty, TaskDifficulty::Simple);
+    }
+
+    #[test]
     fn parse_with_markdown_code_block() {
         let text =
             "```json\n{\"category\":\"chat\",\"chat_text\":\"Hi!\",\"difficulty\":\"simple\"}\n```";
@@ -248,6 +271,12 @@ mod tests {
         let order = MessageCategory::Order;
         let json = serde_json::to_string(&order).unwrap();
         assert_eq!(json, "\"order\"");
+
+        let clarify = MessageCategory::Clarify;
+        let json = serde_json::to_string(&clarify).unwrap();
+        assert_eq!(json, "\"clarify\"");
+        let restored: MessageCategory = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, MessageCategory::Clarify);
     }
 
     #[test]

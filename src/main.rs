@@ -749,8 +749,16 @@ Better than browser for plain-text pages — faster and lighter.\n\n\
 Use for: complex incident diagnosis, multi-step deployment planning, architecture decisions.\n\
 Use when the problem has many moving parts and you need to reason through it step by step.\n\
 Do NOT use for simple tasks — it is slower and not needed.\n\n\
-
 ═══ HOW TO THINK AND ACT ═══\n\n\
+═══ MANDATORY: LIVE UPDATES VIA send_message ═══\n\
+You MUST use send_message to keep the owner informed during multi-step tasks.\n\
+The owner cannot see your tool output — send_message is the ONLY way they see progress.\n\
+Rules (non-negotiable):\n\
+- After EVERY file_write/file_edit: send_message '✏️ Modified: <filename>'\n\
+- After EVERY shell command: send_message '⚙️ Ran: <command summary> — <result>'\n\
+- After EVERY significant action: send_message with what you did and what happened\n\
+- If something fails: send_message '❌ Error: <what failed>' — then ask how to proceed\n\
+- For long tasks: send_message progress every 2-3 tool calls minimum\n\n\
 ── EVERY MESSAGE — FIRST THING ──\n\
 For ANY task that takes more than one LLM call (uses tools, runs commands, does research):\n\
   Send IMMEDIATELY via send_message: '⏳ On it...'\n\
@@ -785,12 +793,13 @@ Step 4 — PLAN (required for ALL complex or destructive tasks):\n\
   Owner says 'just do it' or 'no plan needed'? Skip the plan and execute immediately.\n\n\
 Step 5 — EXECUTE with live updates:\n\
   Run each step. After EACH tool call, send_message: '⚙️ Step N/M: <what you did> — <result>'\n\
+  After EACH file change, send_message: '✏️ Modified: <filename> — <what changed>'\n\
   If a step fails: stop immediately, send_message the error, ask how to proceed.\n\
   For long shell commands: send_message the output summary, not the full dump.\n\n\
 Step 6 — REPORT when done:\n\
   ✅ DONE: <what was accomplished>\n\
-  Results: <key output — numbers, URLs, status>\n\
-  Time: <how long>\n\n\
+  Files changed: <list of files modified>\n\
+  Results: <key output — numbers, URLs, status>\n\n\
 For SIMPLE tasks (single command, direct answer): skip ack, plan, and steps. Just do it.\n\n\
 ═══ INLINE BUTTONS ═══\n\
 Whenever you need input from the owner, format like this:\n\
@@ -2488,7 +2497,7 @@ Investigate and remediate.",
                                                 let phase = rx.borrow_and_update().phase.clone();
                                                 let new_line: Option<String> = match &phase {
                                                     AgentTaskPhase::ExecutingTool {
-                                                        tool_name, tool_index, tool_total, ..
+                                                        tool_name, tool_index, tool_total, detail, ..
                                                     } => {
                                                         let key = format!("{}-{}", tool_index, tool_name);
                                                         if last_tool.as_deref() == Some(&key) {
@@ -2510,12 +2519,17 @@ Investigate and remediate.",
                                                                     | "mcp_manage"             => "🔌",
                                                                 _                              => "🛠️",
                                                             };
+                                                            let detail_suffix = match detail {
+                                                                Some(d) if !d.is_empty() => format!(": {}", d),
+                                                                _ => String::new(),
+                                                            };
                                                             Some(format!(
-                                                                "{} [{}/{}] {}",
+                                                                "{} [{}/{}] {}{}",
                                                                 emoji,
                                                                 tool_index + 1,
                                                                 tool_total,
-                                                                tool_name
+                                                                tool_name,
+                                                                detail_suffix
                                                             ))
                                                         }
                                                     }
