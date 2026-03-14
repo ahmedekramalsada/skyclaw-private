@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# deploy.sh — Build Locally + Push to Server
+# deploy.sh — The One Script to Rule Them All
 # Usage: bash deploy.sh <target> [flags]
 #
 # <target>   IP address (e.g. 1.2.3.4) or SSH alias (e.g. x)
@@ -103,23 +103,23 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Git
 if ! command -v git &>/dev/null; then
-  apt-get update -qq && apt-get install -y -qq git
+  sudo apt-get update -qq && sudo apt-get install -y -qq git
 fi
 
 # Node.js + npx
 if ! command -v node &>/dev/null; then
-  curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - >/dev/null 2>&1
-  apt-get install -y -qq nodejs >/dev/null 2>&1
+  curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash - >/dev/null 2>&1
+  sudo apt-get install -y -qq nodejs >/dev/null 2>&1
 fi
 
 # OpenCode
 if ! command -v opencode &>/dev/null; then
-  npm install -g opencode-ai --silent 2>/dev/null
+  sudo npm install -g opencode-ai --silent 2>/dev/null
 fi
 
 # lsof (needed by start.sh)
 if ! command -v lsof &>/dev/null; then
-  apt-get install -y -qq lsof 2>/dev/null
+  sudo apt-get install -y -qq lsof 2>/dev/null
 fi
 
 echo "DEPS_OK"
@@ -141,9 +141,9 @@ for dir in \
   /opt/scripts \
   /opt/ansible/playbooks \
   /opt/terraform; do
-  mkdir -p "$dir"
+  sudo mkdir -p "$dir"
 done
-chmod 700 /root/.skyclaw /root/.skyclaw/vault
+sudo chmod 700 /root/.skyclaw /root/.skyclaw/vault
 echo "DIRS_OK"
 DIR_EOF
   ok "Directories created"
@@ -153,13 +153,13 @@ DIR_EOF
 
   # skyclaw.toml
   scp "$REPO_DIR/skyclaw.toml" "$REMOTE_DEST:/tmp/skyclaw.toml"
-  ssh "$REMOTE_DEST" "mv /tmp/skyclaw.toml $REMOTE_CONFIG_DIR/skyclaw.toml"
+  ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw.toml $REMOTE_CONFIG_DIR/skyclaw.toml"
   ok "skyclaw.toml"
 
   # mcp.toml (only if not already customised)
   if [[ -f "$REPO_DIR/deploy/mcp.toml" ]]; then
     scp "$REPO_DIR/deploy/mcp.toml" "$REMOTE_DEST:/tmp/mcp.toml"
-    ssh "$REMOTE_DEST" "[[ -f $REMOTE_CONFIG_DIR/mcp.toml ]] && echo 'exists' || mv /tmp/mcp.toml $REMOTE_CONFIG_DIR/mcp.toml"
+    ssh "$REMOTE_DEST" "sudo test -f $REMOTE_CONFIG_DIR/mcp.toml && echo 'exists' || sudo mv /tmp/mcp.toml $REMOTE_CONFIG_DIR/mcp.toml"
     ok "mcp.toml"
   fi
 
@@ -167,9 +167,9 @@ DIR_EOF
   if [[ -f "$REPO_DIR/.env.example" ]]; then
     scp "$REPO_DIR/.env.example" "$REMOTE_DEST:/tmp/.env.example"
     ssh "$REMOTE_DEST" bash -s << 'ENV_EOF'
-if [[ ! -f /root/.skyclaw/.env ]]; then
-  mv /tmp/.env.example /root/.skyclaw/.env
-  chmod 600 /root/.skyclaw/.env
+if sudo test ! -f /root/.skyclaw/.env; then
+  sudo mv /tmp/.env.example /root/.skyclaw/.env
+  sudo chmod 600 /root/.skyclaw/.env
   echo "CREATED"
 else
   rm -f /tmp/.env.example
@@ -183,7 +183,7 @@ ENV_EOF
   for f in workspace/HEARTBEAT.md workspace/backup.sh workspace/restore.sh; do
     if [[ -f "$REPO_DIR/$f" ]]; then
       scp "$REPO_DIR/$f" "$REMOTE_DEST:/tmp/$(basename $f)"
-      ssh "$REMOTE_DEST" "mv /tmp/$(basename $f) $REMOTE_CONFIG_DIR/$f && chmod +x $REMOTE_CONFIG_DIR/$f 2>/dev/null || true"
+      ssh "$REMOTE_DEST" "sudo mv /tmp/$(basename $f) $REMOTE_CONFIG_DIR/$f && sudo chmod +x $REMOTE_CONFIG_DIR/$f 2>/dev/null || true"
     fi
   done
   ok "Workspace files (HEARTBEAT, backup, restore)"
@@ -192,30 +192,30 @@ ENV_EOF
   for skill in devops-core incident-response deployment self-management; do
     if [[ -f "$REPO_DIR/skills/$skill.md" ]]; then
       scp "$REPO_DIR/skills/$skill.md" "$REMOTE_DEST:/tmp/$skill.md"
-      ssh "$REMOTE_DEST" "mv /tmp/$skill.md $REMOTE_CONFIG_DIR/skills/$skill.md"
+      ssh "$REMOTE_DEST" "sudo mv /tmp/$skill.md $REMOTE_CONFIG_DIR/skills/$skill.md"
     fi
   done
   ok "Skills"
 
   # start.sh — push it to the server so they can use it
-  scp "$REPO_DIR/start.sh" "$REMOTE_DEST:/root/start.sh"
-  ssh "$REMOTE_DEST" "chmod +x /root/start.sh"
+  scp "$REPO_DIR/start.sh" "$REMOTE_DEST:/tmp/start.sh"
+  ssh "$REMOTE_DEST" "sudo mv /tmp/start.sh /root/start.sh && sudo chmod +x /root/start.sh"
   ok "start.sh pushed to /root/start.sh"
 
   # ── Systemd service ─────────────────────────────────────────────────────
   info "Installing systemd service..."
   if [[ -f "$REPO_DIR/deploy/skyclaw.service" ]]; then
     scp "$REPO_DIR/deploy/skyclaw.service" "$REMOTE_DEST:/tmp/skyclaw.service"
-    ssh "$REMOTE_DEST" "mv /tmp/skyclaw.service /etc/systemd/system/skyclaw.service && systemctl daemon-reload && systemctl enable skyclaw"
+    ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw.service /etc/systemd/system/skyclaw.service && sudo systemctl daemon-reload && sudo systemctl enable skyclaw"
     ok "systemd service installed and enabled"
   fi
 
   # ── OpenCode config ─────────────────────────────────────────────────────
   info "Setting up OpenCode config..."
   ssh "$REMOTE_DEST" bash -s << 'OC_EOF'
-mkdir -p /root/.config/opencode
-if [[ ! -f /root/.config/opencode/opencode.json ]]; then
-  cat > /root/.config/opencode/opencode.json << 'OCJSON'
+sudo mkdir -p /root/.config/opencode
+if sudo test ! -f /root/.config/opencode/opencode.json; then
+  sudo tee /root/.config/opencode/opencode.json > /dev/null << 'OCJSON'
 {
   "provider": "openrouter",
   "model": "deepseek/deepseek-r1-0528",
@@ -223,7 +223,7 @@ if [[ ! -f /root/.config/opencode/opencode.json ]]; then
   "disabled_providers": []
 }
 OCJSON
-  chmod 600 /root/.config/opencode/opencode.json
+  sudo chmod 600 /root/.config/opencode/opencode.json
   echo "CREATED"
 else
   echo "EXISTS"
@@ -234,9 +234,9 @@ OC_EOF
   # ── SSH key ─────────────────────────────────────────────────────────────
   info "Setting up SSH key..."
   ssh "$REMOTE_DEST" bash -s << 'SSH_EOF'
-mkdir -p /root/.ssh && chmod 700 /root/.ssh
-if [[ ! -f /root/.ssh/batabeto ]]; then
-  ssh-keygen -t ed25519 -C "batabeto-agent" -f /root/.ssh/batabeto -N ""
+sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
+if sudo test ! -f /root/.ssh/batabeto; then
+  sudo ssh-keygen -t ed25519 -C "batabeto-agent" -f /root/.ssh/batabeto -N ""
   echo "GENERATED"
 else
   echo "EXISTS"
@@ -281,7 +281,7 @@ fi
 
 # ── Stop remote service ─────────────────────────────────────────────────────
 info "Stopping skyclaw on $REMOTE_DEST..."
-ssh "$REMOTE_DEST" "systemctl stop skyclaw 2>/dev/null" || true
+ssh "$REMOTE_DEST" "sudo systemctl stop skyclaw 2>/dev/null" || true
 ok "Service stopped"
 
 # ── Upload binary ────────────────────────────────────────────────────────────
@@ -290,14 +290,14 @@ scp "$LOCAL_BINARY" "$REMOTE_DEST:/tmp/$BINARY_NAME"
 ok "Binary uploaded"
 
 info "Installing binary to $REMOTE_PATH..."
-ssh "$REMOTE_DEST" "mv /tmp/$BINARY_NAME $REMOTE_PATH && chown root:root $REMOTE_PATH && chmod 755 $REMOTE_PATH"
+ssh "$REMOTE_DEST" "sudo mv /tmp/$BINARY_NAME $REMOTE_PATH && sudo chown root:root $REMOTE_PATH && sudo chmod 755 $REMOTE_PATH"
 ok "Binary installed"
 
 # ── Sync config files (optional, for non-init updates) ───────────────────────
 if [[ "$SYNC_CONFIG" == "true" ]]; then
   info "Syncing skyclaw.toml to $REMOTE_DEST..."
   scp "$REPO_DIR/skyclaw.toml" "$REMOTE_DEST:/tmp/skyclaw.toml"
-  ssh "$REMOTE_DEST" "mv /tmp/skyclaw.toml $REMOTE_CONFIG_DIR/skyclaw.toml && chown root:root $REMOTE_CONFIG_DIR/skyclaw.toml"
+  ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw.toml $REMOTE_CONFIG_DIR/skyclaw.toml && sudo chown root:root $REMOTE_CONFIG_DIR/skyclaw.toml"
   ok "Config synced"
 fi
 
@@ -305,7 +305,7 @@ if [[ "$SYNC_ENV" == "true" ]]; then
   if [[ -f "$REPO_DIR/.env" ]]; then
     info "Syncing .env to $REMOTE_DEST..."
     scp "$REPO_DIR/.env" "$REMOTE_DEST:/tmp/.env"
-    ssh "$REMOTE_DEST" "mv /tmp/.env $REMOTE_CONFIG_DIR/.env && chown root:root $REMOTE_CONFIG_DIR/.env && chmod 600 $REMOTE_CONFIG_DIR/.env"
+    ssh "$REMOTE_DEST" "sudo mv /tmp/.env $REMOTE_CONFIG_DIR/.env && sudo chown root:root $REMOTE_CONFIG_DIR/.env && sudo chmod 600 $REMOTE_CONFIG_DIR/.env"
     ok ".env synced"
   else
     warn "No .env file found locally — skipping"
@@ -314,19 +314,19 @@ fi
 
 # ── Start service ────────────────────────────────────────────────────────────
 info "Starting skyclaw on $REMOTE_DEST..."
-ssh "$REMOTE_DEST" "systemctl start skyclaw"
+ssh "$REMOTE_DEST" "sudo systemctl start skyclaw"
 ok "skyclaw is live on $REMOTE_DEST"
 
 echo ""
 echo -e "${GREEN}${BOLD}Deploy complete.${RESET}"
 echo ""
-echo -e "  Watch logs: ${BLUE}ssh $REMOTE_DEST 'journalctl -fu skyclaw'${RESET}"
-echo -e "  Status:     ${BLUE}ssh $REMOTE_DEST 'systemctl status skyclaw'${RESET}"
+echo -e "  Watch logs: ${BLUE}ssh $REMOTE_DEST 'sudo journalctl -fu skyclaw'${RESET}"
+echo -e "  Status:     ${BLUE}ssh $REMOTE_DEST 'sudo systemctl status skyclaw'${RESET}"
 echo ""
 if [[ "$INIT_MODE" == "true" ]]; then
   echo -e "  ${YELLOW}IMPORTANT:${RESET} Edit .env on the server:"
-  echo -e "  ${BLUE}ssh $REMOTE_DEST 'nano /root/.skyclaw/.env'${RESET}"
+  echo -e "  ${BLUE}ssh $REMOTE_DEST${RESET} then ${BLUE}sudo nano /root/.skyclaw/.env${RESET}"
   echo -e "  Set: TELEGRAM_BOT_TOKEN, OPENROUTER_API_KEY, OWNER_CHAT_ID"
-  echo -e "  Then restart: ${BLUE}ssh $REMOTE_DEST 'systemctl restart skyclaw'${RESET}"
+  echo -e "  Then: ${BLUE}sudo systemctl restart skyclaw${RESET}"
   echo ""
 fi
