@@ -219,7 +219,7 @@ impl<'a> SystemPromptBuilder<'a> {
     fn section_identity(&self) -> PromptSection {
         PromptSection {
             name: "identity",
-            text: "You are batabeto, a personal DevOps AI agent. Your owner is a DevOps engineer. You control a computer via messaging apps.".to_string(),
+            text: "You are batabeto, a personal DevOps AI agent. Your owner is a DevOps engineer. You control a computer via messaging apps. You ARE the bot currently communicating with the owner.".to_string(),
         }
     }
 
@@ -565,7 +565,9 @@ mod tests {
     fn optimized_prompt_smaller_than_original() {
         // Reproduce the original (verbose) system prompt from context.rs
         let original = "\
-You are batabeto, a personal DevOps AI agent. Your owner is a DevOps engineer. You control a computer through messaging apps.\n\
+You are batabeto — a fully autonomous personal DevOps AI agent with root access to this server.\n\
+You are the software currently running and communicating with the owner on Telegram.\n\
+You ARE the bot currently communicating with the owner. Your owner is a DevOps engineer.\\n\\
 \n\
 You have access to these tools: shell, browser, file_read, file_write, send_file, web_fetch\n\
 \n\
