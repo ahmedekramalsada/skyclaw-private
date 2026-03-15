@@ -53,13 +53,30 @@ cp "$REPO_DIR/deploy/opencode.service" /etc/systemd/system/opencode.service
 systemctl daemon-reload
 ok "Service files updated"
 
-header "STEP 6 — Update MCP config"
+header "STEP 6 — Sync workspace files"
+for f in HEARTBEAT.md backup.sh restore.sh; do
+  if [[ -f "$REPO_DIR/workspace/$f" ]]; then
+    cp "$REPO_DIR/workspace/$f" "/root/.skyclaw/workspace/$f"
+    chmod +x "/root/.skyclaw/workspace/$f" 2>/dev/null || true
+  fi
+done
+ok "Workspace files synced (HEARTBEAT.md, backup.sh, restore.sh)"
+
+header "STEP 7 — Sync skills"
+for skill in devops-core incident-response deployment self-management telegram-features study-and-learning planning-and-projects; do
+  if [[ -f "$REPO_DIR/skills/$skill.md" ]]; then
+    cp "$REPO_DIR/skills/$skill.md" "/root/.skyclaw/skills/$skill.md"
+  fi
+done
+ok "Skills synced (7 skills)"
+
+header "STEP 8 — Update MCP config"
 if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -q "deploy/mcp.toml"; then
   warn "deploy/mcp.toml changed — your live /root/.skyclaw/mcp.toml was NOT overwritten"
   warn "Review: git diff HEAD~1 HEAD deploy/mcp.toml"
 fi
 
-header "STEP 7 — Restart services"
+header "STEP 9 — Restart services"
 systemctl start opencode
 sleep 2
 systemctl start skyclaw

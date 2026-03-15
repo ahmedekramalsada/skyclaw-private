@@ -26,7 +26,7 @@ echo ""
 header "STEP 1 — System packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq git curl lsof wget build-essential
+apt-get install -y -qq git curl wget build-essential sqlite3
 ok "System packages installed"
 
 header "STEP 2 — Node.js"
@@ -36,17 +36,11 @@ if ! command -v node &>/dev/null; then
 fi
 ok "Node.js $(node --version)"
 
-header "STEP 3 — Tailscale"
-if ! command -v tailscale &>/dev/null; then
-  curl -fsSL https://tailscale.com/install.sh | sh
-fi
-ok "Tailscale installed"
-
-header "STEP 4 — OpenCode"
+header "STEP 3 — OpenCode"
 command -v opencode &>/dev/null || npm install -g opencode-ai --silent 2>/dev/null || true
 command -v opencode &>/dev/null && ok "OpenCode installed" || warn "OpenCode install failed — coding tasks will use shell fallback"
 
-header "STEP 5 — Directories"
+header "STEP 4 — Directories"
 for d in "$INSTALL_DIR" "$INSTALL_DIR/workspace" "$INSTALL_DIR/workspace/cron" \
   "$INSTALL_DIR/skills" "$INSTALL_DIR/vault" "$INSTALL_DIR/backups" \
   /opt/scripts /opt/ansible/playbooks /opt/terraform; do
@@ -56,7 +50,7 @@ chmod 700 "$INSTALL_DIR" "$INSTALL_DIR/vault"
 chown -R root:root "$INSTALL_DIR"
 ok "Directories created"
 
-header "STEP 6 — Config files"
+header "STEP 5 — Config files"
 [[ -f "$SCRIPT_DIR/skyclaw.toml" ]] && cp "$SCRIPT_DIR/skyclaw.toml" "$INSTALL_DIR/skyclaw.toml" && ok "skyclaw.toml"
 if [[ -f "$SCRIPT_DIR/deploy/mcp.toml" ]]; then
   [[ ! -f "$INSTALL_DIR/mcp.toml" ]] && cp "$SCRIPT_DIR/deploy/mcp.toml" "$INSTALL_DIR/mcp.toml"
@@ -68,14 +62,14 @@ if [[ ! -f "$INSTALL_DIR/.env" && -f "$SCRIPT_DIR/.env.example" ]]; then
   ok ".env created from template — edit it: nano $INSTALL_DIR/.env"
 fi
 
-header "STEP 7 — Skills"
-for skill in devops-core incident-response deployment self-management; do
+header "STEP 6 — Skills"
+for skill in devops-core incident-response deployment self-management telegram-features study-and-learning planning-and-projects; do
   [[ -f "$SCRIPT_DIR/skills/$skill.md" ]] && \
     cp "$SCRIPT_DIR/skills/$skill.md" "$INSTALL_DIR/skills/$skill.md"
 done
 ok "Skills installed"
 
-header "STEP 8 — Workspace files"
+header "STEP 7 — Workspace files"
 for f in HEARTBEAT.md backup.sh restore.sh; do
   [[ -f "$SCRIPT_DIR/workspace/$f" ]] && \
     cp "$SCRIPT_DIR/workspace/$f" "$INSTALL_DIR/workspace/$f" && \
@@ -83,19 +77,19 @@ for f in HEARTBEAT.md backup.sh restore.sh; do
 done
 ok "Workspace files installed"
 
-header "STEP 9 — Bot systemd service"
+header "STEP 8 — Bot systemd service"
 cp "$SCRIPT_DIR/deploy/skyclaw.service" /etc/systemd/system/skyclaw.service
 systemctl daemon-reload
 systemctl enable skyclaw
 ok "skyclaw.service installed and enabled"
 
-header "STEP 10 — SSH key for batabeto"
+header "STEP 9 — SSH key for batabeto"
 mkdir -p /root/.ssh && chmod 700 /root/.ssh
 [[ ! -f /root/.ssh/batabeto ]] && \
   ssh-keygen -t ed25519 -C "batabeto-agent" -f /root/.ssh/batabeto -N ""
 ok "SSH key ready: /root/.ssh/batabeto"
 
-header "STEP 11 — OpenCode config"
+header "STEP 10 — OpenCode config"
 mkdir -p /root/.config/opencode
 if [[ ! -f /root/.config/opencode/opencode.json ]]; then
   echo '{"provider":"openrouter","model":"deepseek/deepseek-r1-0528","autoshare":false,"disabled_providers":[]}' \
@@ -110,7 +104,6 @@ echo ""
 echo -e "  ${YELLOW}NEXT STEPS:${RESET}"
 echo -e "  1. Edit .env:     ${BLUE}nano $INSTALL_DIR/.env${RESET}"
 echo -e "     Set: TELEGRAM_BOT_TOKEN, OPENROUTER_API_KEY, OWNER_CHAT_ID"
-echo -e "  2. Tailscale:     ${BLUE}tailscale up${RESET}"
 echo -e "  3. Copy binary:   ${BLUE}sudo cp target/release/skyclaw /usr/local/bin/${RESET}"
 echo -e "  4. Start:         ${BLUE}sudo bash start.sh${RESET}"
 echo ""

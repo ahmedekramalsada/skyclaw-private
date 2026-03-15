@@ -75,11 +75,10 @@ if [[ "$INIT_MODE" == "true" ]]; then
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update -qq
-sudo apt-get install -y -qq git curl lsof wget
+sudo apt-get install -y -qq git curl wget sqlite3
 command -v node &>/dev/null || \
   (curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash - >/dev/null 2>&1 && \
    sudo apt-get install -y -qq nodejs)
-command -v tailscale &>/dev/null || curl -fsSL https://tailscale.com/install.sh | sudo sh
 # Install opencode globally so it's available as a system command
 command -v opencode &>/dev/null || sudo npm install -g opencode-ai --silent 2>/dev/null || true
 # Pre-install MCP server packages so npx doesn't download them cold at runtime
@@ -92,7 +91,7 @@ sudo npm install -g \
   --silent 2>/dev/null || true
 echo "DEPS_OK"
 DEPS_EOF
-  ok "Runtime deps (git, Node.js, Tailscale, opencode, MCP packages)"
+  ok "Runtime deps (git, Node.js, sqlite3, opencode, MCP packages)"
 
   # ── Step 2: directories ───────────────────────────────────────────────────
   _ssh "$REMOTE_DEST" bash -s << 'DIR_EOF'
@@ -131,7 +130,7 @@ DIR_EOF
   done
   ok "Workspace files"
 
-  for skill in devops-core incident-response deployment self-management; do
+  for skill in devops-core incident-response deployment self-management telegram-features study-and-learning planning-and-projects; do
     if [[ -f "$REPO_DIR/skills/$skill.md" ]]; then
       _scp "$REPO_DIR/skills/$skill.md" "$REMOTE_DEST:/tmp/$skill.md"
       _ssh "$REMOTE_DEST" "sudo mv /tmp/$skill.md $REMOTE_DIR/skills/$skill.md"
@@ -258,7 +257,7 @@ if [[ "$INIT_MODE" == "true" ]]; then
   echo -e "  1. Edit .env:   ${BLUE}ssh $REMOTE_DEST 'sudo nano /root/.skyclaw/.env'${RESET}"
   echo -e "     Set: TELEGRAM_BOT_TOKEN, OPENROUTER_API_KEY, OWNER_CHAT_ID"
   echo -e "     For backup: GITHUB_TOKEN, GITHUB_USERNAME, GITHUB_BACKUP_REPO"
-  echo -e "  2. Tailscale:   ${BLUE}ssh $REMOTE_DEST 'sudo tailscale up'${RESET}"
-  echo -e "  3. Start bot:   ${BLUE}ssh $REMOTE_DEST 'sudo bash /root/start.sh'${RESET}"
+  echo -e "  2. Start:       ${BLUE}ssh $REMOTE_DEST 'sudo bash /root/start.sh'${RESET}"
+
   echo ""
 fi

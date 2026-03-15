@@ -585,6 +585,7 @@ impl AgentRuntime {
                         text: budget_err,
                         reply_to: Some(msg.id.clone()),
                         parse_mode: Some(ParseMode::Plain),
+                    reply_to_message_id: None,
                     },
                     TurnUsage {
                         api_calls: turn_api_calls,
@@ -607,6 +608,7 @@ impl AgentRuntime {
                         text: "The AI provider is currently unavailable. I'll retry automatically when it recovers.".to_string(),
                         reply_to: Some(msg.id.clone()),
                         parse_mode: Some(ParseMode::Plain),
+                    reply_to_message_id: None,
                     },
                     TurnUsage {
                         api_calls: turn_api_calls,
@@ -1006,6 +1008,7 @@ impl AgentRuntime {
                 text,
                 reply_to: Some(msg.id.clone()),
                 parse_mode: Some(ParseMode::Plain),
+            reply_to_message_id: None,
             },
             TurnUsage {
                 api_calls: turn_api_calls,

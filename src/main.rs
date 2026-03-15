@@ -726,7 +726,11 @@ You are his engineer, co-builder, study partner, life planner, and deployment en
 - You have 6 MCP servers installed: opencode (AI coding agent), github, package-docs, kubernetes, fetch, think.\n\
 - You can install new MCP servers anytime to gain new capabilities.\n\
 - You can create custom tools with self_create_tool that persist across all sessions.\n\
-- Everything you learn about X, his servers, projects, and goals goes into memory and stays there permanently.\n\n\
+- Everything you learn about X, his servers, projects, and goals goes into memory and stays there permanently.\n\
+- Your binary: /usr/local/bin/skyclaw  Your service: systemctl status skyclaw\n\
+- Your logs: journalctl -fu skyclaw    OpenCode logs: journalctl -fu opencode\n\
+- OpenCode API: http://localhost:4096 (check if alive: curl -s http://localhost:4096/health)\n\
+- Your version: run /version to see build info\n\n\
 ═══ WHO X IS ═══\n\
 - Name: Ahmed Ekram — calls himself X\n\
 - Role: DevOps engineer — professional, experienced, no need to explain basics\n\
@@ -3774,34 +3778,6 @@ Just type a message to chat with the AI agent.",
                                             return;
                                         }
 
-                                        // ── Dashboard pause check ─────────────────────────────────
-                                        // Dashboard writes ~/.skyclaw/dashboard-pause to pause the bot.
-                                        // We wait here (before starting any new task) until removed.
-                                        {
-                                            let pause_path = dirs::home_dir()
-                                                .unwrap_or_default()
-                                                .join(".skyclaw")
-                                                .join("dashboard-pause");
-                                            if pause_path.exists() {
-                                                tracing::info!("Bot paused by dashboard");
-                                                let pause_reply = skyclaw_core::types::message::OutboundMessage {
-                                                    chat_id:    msg.chat_id.clone(),
-                                                    text:       "⏸ Paused by dashboard. Tap ▶ Resume to continue.".to_string(),
-                                                    reply_to:   Some(msg.id.clone()),
-                                                    parse_mode: None,
-                                                reply_to_message_id: None,
-                                                };
-                                                send_with_retry(&*sender, pause_reply).await;
-                                                loop {
-                                                    tokio::time::sleep(
-                                                        std::time::Duration::from_millis(500)
-                                                    ).await;
-                                                    if !pause_path.exists() { break; }
-                                                }
-                                                tracing::info!("Bot resumed by dashboard");
-                                            }
-                                        }
-
                                         // ── Normal mode: process with agent ────
 
                                         // Download attachments
@@ -4343,64 +4319,26 @@ Just type a message to chat with the AI agent.",
                     config.gateway.host, config.gateway.port
                 );
 
-                // ── Dashboard startup notification ─────────────────────────
-                // Resolves Tailscale IP, reads dashboard token, sends link on Telegram.
-                // Runs in background — doesn't block startup.
+                // ── Startup notification ──────────────────────────────────
+                // Sends startup message to X via Telegram after boot.
+                // Agent then runs the full STARTUP BEHAVIOR from system prompt.
                 {
                     let startup_sender = primary_channel.clone();
                     let startup_chat   = std::env::var("OWNER_CHAT_ID").unwrap_or_default();
-                    let dash_port: u16 = std::env::var("DASHBOARD_PORT")
-                        .ok()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(8888);
 
                     tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-                        let ts_ip = tokio::process::Command::new("tailscale")
-                            .args(["ip", "-4"])
-                            .output()
-                            .await
-                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                            .unwrap_or_default();
-
-                        if ts_ip.is_empty() {
-                            tracing::info!("Tailscale not running — dashboard link not sent");
-                            return;
-                        }
-
-                        let token_path = dirs::home_dir()
-                            .unwrap_or_default()
-                            .join(".skyclaw")
-                            .join("dashboard-token");
-                        let token = std::fs::read_to_string(&token_path)
-                            .unwrap_or_default()
-                            .trim()
-                            .to_string();
-
-                        if token.is_empty() {
-                            tracing::info!("No dashboard token — start skyclaw-dashboard first");
-                            return;
-                        }
-
-                        let url = format!(
-                            "http://{}:{}/dashboard?token={}",
-                            ts_ip, dash_port, token
-                        );
-
                         if let (Some(sender), false) = (startup_sender, startup_chat.is_empty()) {
                             let msg = skyclaw_core::types::message::OutboundMessage {
                                 chat_id:    startup_chat,
-                                text:       format!(
-                                    "🟢 batabeto online\n📊 Dashboard: {}\n\nActivity · Files · Logs · Diff · Terminal",
-                                    url
-                                ),
+                                text:       "🟢 batabeto online — running startup checks...".to_string(),
                                 reply_to:   None,
                                 parse_mode: None,
-                            reply_to_message_id: None,
+                                reply_to_message_id: None,
                             };
                             let _ = sender.send_message(msg).await;
-                            tracing::info!(url = %url, "Dashboard link sent to Telegram");
+                            tracing::info!("Startup notification sent to Telegram");
                         }
                     });
                 }
