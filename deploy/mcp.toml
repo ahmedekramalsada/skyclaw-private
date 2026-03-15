@@ -53,6 +53,17 @@ transport = "stdio"
 command   = "npx"
 args      = ["-y", "mcp-server-kubernetes"]
 
+# ── fetch — read any URL as clean text ───────────────────────────────────────
+# Fetches any URL and returns the content as clean text — no browser needed.
+# Use for: official docs, release notes, runbooks, Stack Overflow, API specs.
+# Faster and lighter than the browser MCP for plain-text pages.
+# No API key required.
+[[servers]]
+name      = "fetch"
+transport = "stdio"
+command   = "npx"
+args      = ["-y", "@modelcontextprotocol/server-fetch"]
+
 # ── Sequential Thinking — structured reasoning ────────────────────────────────
 # Breaks complex multi-step problems into a transparent reasoning chain.
 # Used for: incident diagnosis, deployment planning, architecture decisions.

@@ -30,6 +30,9 @@ pub struct OutboundMessage {
     pub text: String,
     pub reply_to: Option<String>,
     pub parse_mode: Option<ParseMode>,
+    /// If set, the message is sent as a reply to this Telegram message ID.
+    #[serde(default)]
+    pub reply_to_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -250,6 +250,7 @@ impl AgentRuntime {
                             .to_string(),
                         reply_to: Some(msg.id.clone()),
                         parse_mode: None,
+                    reply_to_message_id: None,
                     },
                     TurnUsage::default(),
                 ));
@@ -420,6 +421,7 @@ impl AgentRuntime {
                                     text: classification.chat_text,
                                     reply_to: Some(msg.id.clone()),
                                     parse_mode: None,
+                                reply_to_message_id: None,
                                 },
                                 TurnUsage {
                                     api_calls: turn_api_calls,
@@ -440,6 +442,7 @@ impl AgentRuntime {
                                     text: classification.chat_text,
                                     reply_to: Some(msg.id.clone()),
                                     parse_mode: None,
+                                reply_to_message_id: None,
                                 };
                                 if let Err(e) = tx.send(ack) {
                                     warn!(error = %e, "Failed to send early reply for order");
@@ -764,6 +767,7 @@ impl AgentRuntime {
                         text: reply_text,
                         reply_to: Some(msg.id.clone()),
                         parse_mode: None,
+                    reply_to_message_id: None,
                     },
                     TurnUsage {
                         api_calls: turn_api_calls,

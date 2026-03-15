@@ -193,6 +193,7 @@ impl StreamingNotifier {
             text: text.to_string(),
             reply_to: None,
             parse_mode: None,
+        reply_to_message_id: None,
         };
 
         match channel.send_message(msg).await {

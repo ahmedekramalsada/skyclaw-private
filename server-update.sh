@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
 # server-update.sh — Pull + Build + Restart (on-server build)
 # Usage: sudo bash server-update.sh
-# ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -32,7 +30,7 @@ ok "Code updated"
 
 header "STEP 2 — Stop services"
 systemctl is-active --quiet skyclaw 2>/dev/null && systemctl stop skyclaw && ok "bot stopped" || warn "bot was not running"
-systemctl is-active --quiet skyclaw-dashboard 2>/dev/null && systemctl stop skyclaw-dashboard && ok "dashboard stopped" || true
+systemctl is-active --quiet opencode 2>/dev/null && systemctl stop opencode && ok "opencode stopped" || true
 
 header "STEP 3 — Build release binary"
 command -v cc &>/dev/null || err "linker 'cc' not found — try: apt install build-essential"
@@ -49,34 +47,29 @@ cp "$REPO_DIR/target/release/skyclaw" "$BINARY_PATH"
 chmod 755 "$BINARY_PATH"
 ok "Binary installed: $BINARY_PATH"
 
-header "STEP 5 — Update dashboard script"
-cp "$REPO_DIR/skyclaw-dashboard.py" /root/.skyclaw/scripts/skyclaw-dashboard.py
-chmod +x /root/.skyclaw/scripts/skyclaw-dashboard.py
-ok "Dashboard script updated"
+header "STEP 5 — Update service files"
+cp "$REPO_DIR/deploy/skyclaw.service" /etc/systemd/system/skyclaw.service
+cp "$REPO_DIR/deploy/opencode.service" /etc/systemd/system/opencode.service
+systemctl daemon-reload
+ok "Service files updated"
 
 header "STEP 6 — Update MCP config"
-# Only update mcp.toml if it hasn't been customised (check via git)
 if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -q "deploy/mcp.toml"; then
-  warn "deploy/mcp.toml changed in this update."
-  warn "Your current /root/.skyclaw/mcp.toml was NOT overwritten."
-  warn "Review the changes: git diff HEAD~1 HEAD deploy/mcp.toml"
-  warn "Then manually apply to /root/.skyclaw/mcp.toml if needed."
+  warn "deploy/mcp.toml changed — your live /root/.skyclaw/mcp.toml was NOT overwritten"
+  warn "Review: git diff HEAD~1 HEAD deploy/mcp.toml"
 fi
 
 header "STEP 7 — Restart services"
+systemctl start opencode
+sleep 2
 systemctl start skyclaw
 sleep 2
-systemctl is-active --quiet skyclaw && ok "bot running" || err "bot failed to start — check: journalctl -fu skyclaw"
-
-systemctl start skyclaw-dashboard
-sleep 1
-systemctl is-active --quiet skyclaw-dashboard && ok "dashboard running" || warn "dashboard failed to start — check: journalctl -fu skyclaw-dashboard"
-
-systemctl is-active --quiet ttyd 2>/dev/null && systemctl restart ttyd && ok "ttyd running" || true
+systemctl is-active --quiet skyclaw && ok "bot running" || err "bot failed — check: journalctl -fu skyclaw"
+systemctl is-active --quiet opencode && ok "opencode running" || warn "opencode failed — check: journalctl -fu opencode"
 
 echo ""
 echo -e "${GREEN}${BOLD}Update complete. batabeto is live.${RESET}"
 echo ""
-echo -e "  Watch bot logs:       ${BLUE}journalctl -fu skyclaw${RESET}"
-echo -e "  Watch dashboard logs: ${BLUE}journalctl -fu skyclaw-dashboard${RESET}"
+echo -e "  Bot logs:      ${BLUE}journalctl -fu skyclaw${RESET}"
+echo -e "  OpenCode logs: ${BLUE}journalctl -fu opencode${RESET}"
 echo ""

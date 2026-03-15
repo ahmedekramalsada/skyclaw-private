@@ -8,8 +8,6 @@
 #   -c          Also sync skyclaw.toml
 #   -e          Also sync .env
 #   --no-build  Skip build, push existing binary
-#
-# The SSH user does NOT need to be root — sudo is used for all privileged ops.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -37,7 +35,6 @@ if [[ -z "$TARGET" ]]; then
 fi
 
 REMOTE_DEST="$TARGET"
-# Auto-prefix root@ for bare IP addresses
 [[ "$TARGET" != *"@"* && "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && REMOTE_DEST="root@$TARGET"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,14 +51,11 @@ info() { echo -e "${BLUE}→${RESET} $1"; }
 warn() { echo -e "${YELLOW}⚠${RESET}  $1"; }
 err()  { echo -e "${RED}✗${RESET} $1"; exit 1; }
 
-# ── SSH config: when accidentally run under sudo, use real user's SSH config
-# so aliases defined in ~/.ssh/config still resolve.
-# NOTE: you don't need sudo to run deploy.sh — just: bash deploy.sh x --init
 SSH_OPTS=()
 if [[ -n "${SUDO_USER:-}" ]]; then
   REAL_HOME=$(eval echo "~$SUDO_USER")
   [[ -f "$REAL_HOME/.ssh/config" ]] && SSH_OPTS+=(-F "$REAL_HOME/.ssh/config")
-  warn "Tip: sudo is not needed. Run as your normal user: bash deploy.sh $TARGET --init"
+  warn "Tip: sudo is not needed. Run: bash deploy.sh $TARGET --init"
 fi
 
 _ssh() { ssh "${SSH_OPTS[@]+"${SSH_OPTS[@]}"}" "$@"; }
@@ -73,10 +67,6 @@ echo -e "${BOLD}║       batabeto — Deploy to Server        ║${RESET}"
 echo -e "${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-# ═══════════════════════════════════════════════════════════════════════════
-# INIT: first-time server setup
-# All remote commands use sudo — works whether SSH user is root or a sudoer.
-# ═══════════════════════════════════════════════════════════════════════════
 if [[ "$INIT_MODE" == "true" ]]; then
   info "Running first-time setup on $REMOTE_DEST..."
 
@@ -85,25 +75,31 @@ if [[ "$INIT_MODE" == "true" ]]; then
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update -qq
-sudo apt-get install -y -qq git curl lsof wget python3 python3-pip
+sudo apt-get install -y -qq git curl lsof wget
 command -v node &>/dev/null || \
   (curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash - >/dev/null 2>&1 && \
    sudo apt-get install -y -qq nodejs)
-# Python 3.12+ (Ubuntu 23+) blocks system pip without this flag.
-# --ignore-installed skips packages already managed by apt (e.g. typing_extensions)
-sudo pip3 install --quiet --break-system-packages --ignore-installed fastapi uvicorn watchdog requests
 command -v tailscale &>/dev/null || curl -fsSL https://tailscale.com/install.sh | sudo sh
+# Install opencode globally so it's available as a system command
 command -v opencode &>/dev/null || sudo npm install -g opencode-ai --silent 2>/dev/null || true
+# Pre-install MCP server packages so npx doesn't download them cold at runtime
+sudo npm install -g \
+  @modelcontextprotocol/server-github \
+  @modelcontextprotocol/server-sequential-thinking \
+  @modelcontextprotocol/server-fetch \
+  mcp-server-kubernetes \
+  mcp-package-docs \
+  --silent 2>/dev/null || true
 echo "DEPS_OK"
 DEPS_EOF
-  ok "Runtime deps (git, Node.js, Python, pip, Tailscale, opencode)"
+  ok "Runtime deps (git, Node.js, Tailscale, opencode, MCP packages)"
 
   # ── Step 2: directories ───────────────────────────────────────────────────
   _ssh "$REMOTE_DEST" bash -s << 'DIR_EOF'
 set -euo pipefail
 for d in /root/.skyclaw /root/.skyclaw/workspace /root/.skyclaw/workspace/cron \
   /root/.skyclaw/skills /root/.skyclaw/vault /root/.skyclaw/backups \
-  /root/.skyclaw/scripts /opt/scripts /opt/ansible/playbooks /opt/terraform; do
+  /opt/scripts /opt/ansible/playbooks /opt/terraform; do
   sudo mkdir -p "$d"
 done
 sudo chmod 700 /root/.skyclaw /root/.skyclaw/vault
@@ -133,7 +129,7 @@ DIR_EOF
       _ssh "$REMOTE_DEST" "sudo mv /tmp/$(basename $f) $REMOTE_DIR/$f && sudo chmod +x $REMOTE_DIR/$f 2>/dev/null || true"
     fi
   done
-  ok "Workspace files (HEARTBEAT, backup, restore)"
+  ok "Workspace files"
 
   for skill in devops-core incident-response deployment self-management; do
     if [[ -f "$REPO_DIR/skills/$skill.md" ]]; then
@@ -143,73 +139,43 @@ DIR_EOF
   done
   ok "Skills"
 
-  _scp "$REPO_DIR/skyclaw-dashboard.py" "$REMOTE_DEST:/tmp/skyclaw-dashboard.py"
-  _ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw-dashboard.py $REMOTE_DIR/scripts/skyclaw-dashboard.py && sudo chmod +x $REMOTE_DIR/scripts/skyclaw-dashboard.py"
-  ok "skyclaw-dashboard.py"
-
   _scp "$REPO_DIR/start.sh" "$REMOTE_DEST:/tmp/start.sh"
   _ssh "$REMOTE_DEST" "sudo mv /tmp/start.sh /root/start.sh && sudo chmod +x /root/start.sh"
   ok "start.sh"
 
-  # ── Step 4: bot systemd service ───────────────────────────────────────────
+  # ── Step 4: systemd services ──────────────────────────────────────────────
   _scp "$REPO_DIR/deploy/skyclaw.service" "$REMOTE_DEST:/tmp/skyclaw.service"
-  _ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw.service /etc/systemd/system/skyclaw.service && sudo systemctl daemon-reload && sudo systemctl enable skyclaw"
+  _ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw.service /etc/systemd/system/skyclaw.service"
   ok "skyclaw.service"
 
-  # ── Step 5: dashboard systemd service ────────────────────────────────────
-  _ssh "$REMOTE_DEST" bash -s << 'SVC_EOF'
-sudo tee /etc/systemd/system/skyclaw-dashboard.service > /dev/null << 'SVCEOF'
-[Unit]
-Description=batabeto live dashboard
-After=network.target skyclaw.service
+  _scp "$REPO_DIR/deploy/opencode.service" "$REMOTE_DEST:/tmp/opencode.service"
+  _ssh "$REMOTE_DEST" "sudo mv /tmp/opencode.service /etc/systemd/system/opencode.service"
+  ok "opencode.service"
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/root/.skyclaw
-EnvironmentFile=-/root/.skyclaw/.env
-Environment="PROJECT_DIR=/root/skyclaw-private"
-Environment="SKYCLAW_DIR=/root/.skyclaw"
-Environment="SKYCLAW_SERVICE=skyclaw"
-Environment="DASHBOARD_PORT=8888"
-Environment="TTYD_PORT=8889"
-ExecStart=/usr/bin/python3 /root/.skyclaw/scripts/skyclaw-dashboard.py
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
+  _ssh "$REMOTE_DEST" "sudo systemctl daemon-reload && sudo systemctl enable skyclaw opencode"
+  ok "Services enabled"
 
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-sudo systemctl daemon-reload && sudo systemctl enable skyclaw-dashboard
-SVC_EOF
-  ok "skyclaw-dashboard.service"
+  # ── Step 5: cron jobs (backup + heartbeat every 15 min) ───────────────────
+  _ssh "$REMOTE_DEST" bash -s << 'CRON_EOF'
+# Install cron jobs for root — idempotent (removes old entries first)
+TMPFILE=$(mktemp)
+crontab -l 2>/dev/null | grep -v "skyclaw\|batabeto\|backup\.sh\|heartbeat" > "$TMPFILE" || true
 
-  # ── Step 6: ttyd ──────────────────────────────────────────────────────────
-  _ssh "$REMOTE_DEST" bash -s << 'TTYD_EOF'
-command -v ttyd &>/dev/null || \
-  (curl -sL "https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64" \
-    -o /tmp/ttyd && sudo mv /tmp/ttyd /usr/local/bin/ttyd && sudo chmod +x /usr/local/bin/ttyd) || true
-TS_IP=$(tailscale ip -4 2>/dev/null || echo "0.0.0.0")
-sudo tee /etc/systemd/system/ttyd.service > /dev/null << TTYDEOF
-[Unit]
-Description=ttyd terminal
-After=network.target
+cat >> "$TMPFILE" << 'CRONLINES'
+# batabeto — backup every 15 min
+*/15 * * * * bash /root/.skyclaw/workspace/backup.sh >> /var/log/skyclaw-backup.log 2>&1
 
-[Service]
-ExecStart=/usr/local/bin/ttyd --port 8889 --interface ${TS_IP} bash
-Restart=always
-User=root
+# batabeto — heartbeat check every 15 min (offset by 7 min so it doesn't clash with backup)
+7,22,37,52 * * * * /usr/local/bin/skyclaw heartbeat >> /var/log/skyclaw-heartbeat.log 2>&1
+CRONLINES
 
-[Install]
-WantedBy=multi-user.target
-TTYDEOF
-sudo systemctl daemon-reload && sudo systemctl enable ttyd
-TTYD_EOF
-  ok "ttyd"
+crontab "$TMPFILE"
+rm -f "$TMPFILE"
+echo "CRON_OK"
+CRON_EOF
+  ok "Cron jobs installed (backup + heartbeat every 15 min)"
 
-  # ── Step 7: OpenCode config ────────────────────────────────────────────────
+  # ── Step 6: OpenCode config ───────────────────────────────────────────────
   _ssh "$REMOTE_DEST" bash -s << 'OC_EOF'
 sudo mkdir -p /root/.config/opencode
 sudo test -f /root/.config/opencode/opencode.json || \
@@ -219,7 +185,7 @@ sudo test -f /root/.config/opencode/opencode.json || \
 OC_EOF
   ok "OpenCode config"
 
-  # ── Step 8: SSH key for batabeto ──────────────────────────────────────────
+  # ── Step 7: SSH key for batabeto ──────────────────────────────────────────
   _ssh "$REMOTE_DEST" bash -s << 'SSH_EOF'
 sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
 sudo test -f /root/.ssh/batabeto || \
@@ -249,8 +215,8 @@ else
   ok "Using existing binary: $(du -sh "$LOCAL_BINARY" | cut -f1)"
 fi
 
-info "Stopping services on $REMOTE_DEST..."
-_ssh "$REMOTE_DEST" "sudo systemctl stop skyclaw 2>/dev/null || true; sudo systemctl stop skyclaw-dashboard 2>/dev/null || true"
+info "Stopping bot on $REMOTE_DEST..."
+_ssh "$REMOTE_DEST" "sudo systemctl stop skyclaw opencode 2>/dev/null || true"
 ok "Services stopped"
 
 info "Uploading binary..."
@@ -258,10 +224,12 @@ _scp "$LOCAL_BINARY" "$REMOTE_DEST:/tmp/$BINARY_NAME"
 _ssh "$REMOTE_DEST" "sudo mv /tmp/$BINARY_NAME $REMOTE_PATH && sudo chmod 755 $REMOTE_PATH"
 ok "Binary installed at $REMOTE_PATH"
 
-info "Updating dashboard script..."
-_scp "$REPO_DIR/skyclaw-dashboard.py" "$REMOTE_DEST:/tmp/skyclaw-dashboard.py"
-_ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw-dashboard.py $REMOTE_DIR/scripts/skyclaw-dashboard.py && sudo chmod +x $REMOTE_DIR/scripts/skyclaw-dashboard.py"
-ok "Dashboard script updated"
+# Always sync updated service files
+_scp "$REPO_DIR/deploy/skyclaw.service" "$REMOTE_DEST:/tmp/skyclaw.service"
+_ssh "$REMOTE_DEST" "sudo mv /tmp/skyclaw.service /etc/systemd/system/skyclaw.service"
+_scp "$REPO_DIR/deploy/opencode.service" "$REMOTE_DEST:/tmp/opencode.service"
+_ssh "$REMOTE_DEST" "sudo mv /tmp/opencode.service /etc/systemd/system/opencode.service && sudo systemctl daemon-reload"
+ok "Service files updated"
 
 if [[ "$SYNC_CONFIG" == "true" ]]; then
   _scp "$REPO_DIR/skyclaw.toml" "$REMOTE_DEST:/tmp/skyclaw.toml"
@@ -276,21 +244,21 @@ if [[ "$SYNC_ENV" == "true" && -f "$REPO_DIR/.env" ]]; then
 fi
 
 info "Starting services on $REMOTE_DEST..."
-_ssh "$REMOTE_DEST" "sudo systemctl start skyclaw && sudo systemctl start skyclaw-dashboard && (sudo systemctl start ttyd 2>/dev/null || true)"
-ok "Services started"
+_ssh "$REMOTE_DEST" "sudo systemctl start opencode && sleep 2 && sudo systemctl start skyclaw"
+ok "Services started (opencode first, then bot)"
 
 echo ""
 echo -e "${GREEN}${BOLD}Deploy complete.${RESET}"
 echo ""
-echo -e "  Bot logs:       ${BLUE}ssh $REMOTE_DEST 'journalctl -fu skyclaw'${RESET}"
-echo -e "  Dashboard logs: ${BLUE}ssh $REMOTE_DEST 'journalctl -fu skyclaw-dashboard'${RESET}"
+echo -e "  Bot logs:      ${BLUE}ssh $REMOTE_DEST 'journalctl -fu skyclaw'${RESET}"
+echo -e "  OpenCode logs: ${BLUE}ssh $REMOTE_DEST 'journalctl -fu opencode'${RESET}"
 echo ""
 if [[ "$INIT_MODE" == "true" ]]; then
   echo -e "  ${YELLOW}NEXT STEPS:${RESET}"
   echo -e "  1. Edit .env:   ${BLUE}ssh $REMOTE_DEST 'sudo nano /root/.skyclaw/.env'${RESET}"
   echo -e "     Set: TELEGRAM_BOT_TOKEN, OPENROUTER_API_KEY, OWNER_CHAT_ID"
+  echo -e "     For backup: GITHUB_TOKEN, GITHUB_USERNAME, GITHUB_BACKUP_REPO"
   echo -e "  2. Tailscale:   ${BLUE}ssh $REMOTE_DEST 'sudo tailscale up'${RESET}"
-  echo -e "     Then install Tailscale app on your phone, sign in with same account."
   echo -e "  3. Start bot:   ${BLUE}ssh $REMOTE_DEST 'sudo bash /root/start.sh'${RESET}"
   echo ""
 fi

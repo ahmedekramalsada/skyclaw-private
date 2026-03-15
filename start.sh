@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# start.sh — Start batabeto + dashboard + terminal
+# start.sh — Start batabeto + OpenCode
 # Usage: sudo bash start.sh
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -26,10 +26,9 @@ echo -e "${BOLD}╚════════════════════�
 echo ""
 
 header "STEP 1 — Pre-flight checks"
-[[ ! -f "$BINARY" ]] && err "Binary not found at $BINARY — run server-setup.sh or deploy.sh first"
+[[ ! -f "$BINARY" ]] && err "Binary not found at $BINARY — run deploy.sh first"
 ok "Binary: $BINARY ($(du -sh $BINARY | cut -f1))"
-
-[[ ! -f "$ENV_FILE" ]] && err ".env not found at $ENV_FILE — run server-setup.sh first"
+[[ ! -f "$ENV_FILE" ]] && err ".env not found at $ENV_FILE — run deploy.sh --init first"
 ok ".env found"
 
 header "STEP 2 — Validate .env"
@@ -42,69 +41,46 @@ else
   ok "TELEGRAM_BOT_TOKEN (${TELEGRAM_BOT_TOKEN:0:10}...)"
 fi
 if [[ -z "${OWNER_CHAT_ID:-}" || "${OWNER_CHAT_ID:-}" == *"your"* ]]; then
-  warn "OWNER_CHAT_ID not set — proactive alerts + dashboard link disabled"
+  warn "OWNER_CHAT_ID not set — proactive alerts disabled"
 else
   ok "OWNER_CHAT_ID ($OWNER_CHAT_ID)"
 fi
 [[ $MISSING -eq 1 ]] && err "TELEGRAM_BOT_TOKEN is required. Edit: nano $ENV_FILE"
 
-header "STEP 3 — OpenCode"
-info "Cleaning stale opencode processes..."
-killall opencode-mcp opencode 2>/dev/null || true
-sleep 1
-info "Starting OpenCode on port 4096..."
-opencode serve --port 4096 > /tmp/opencode-startup.log 2>&1 &
+header "STEP 3 — OpenCode (systemd)"
+# OpenCode runs as a proper systemd service — not a fragile background process
+if systemctl is-enabled opencode &>/dev/null; then
+  systemctl restart opencode
+  sleep 2
+  systemctl is-active --quiet opencode && ok "OpenCode running on port 4096" || \
+    warn "OpenCode failed — coding tasks will use shell fallback. Check: journalctl -fu opencode"
+else
+  warn "opencode.service not installed — run deploy.sh --init to fix"
+  warn "Coding tasks will use shell fallback"
+fi
+
+header "STEP 4 — Kill any stale bot processes (prevents 409)"
+pkill -f "/usr/local/bin/skyclaw" 2>/dev/null || true
 sleep 2
-lsof -i :4096 >/dev/null 2>&1 && ok "OpenCode running on port 4096" || \
-  warn "OpenCode failed to start — coding tasks will use shell fallback"
+ok "Stale processes cleared"
 
-header "STEP 4 — Dashboard"
-# BUG FIX: always copy the dashboard script from the repo so it's never stale/missing
-SCRIPT_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/skyclaw-dashboard.py"
-SCRIPT_DST="/root/.skyclaw/scripts/skyclaw-dashboard.py"
-mkdir -p /root/.skyclaw/scripts
-if [[ -f "$SCRIPT_SRC" ]]; then
-  cp "$SCRIPT_SRC" "$SCRIPT_DST"
-  chmod +x "$SCRIPT_DST"
-  ok "Dashboard script deployed to $SCRIPT_DST"
-else
-  warn "skyclaw-dashboard.py not found in repo root — using existing script if present"
-fi
-if [[ -f "$SCRIPT_DST" ]]; then
-  if systemctl is-active --quiet skyclaw-dashboard 2>/dev/null; then
-    systemctl restart skyclaw-dashboard
-    ok "Dashboard restarted"
-  else
-    systemctl start skyclaw-dashboard 2>/dev/null && ok "Dashboard started" || \
-      warn "Dashboard failed — check: journalctl -fu skyclaw-dashboard"
-  fi
-else
-  warn "Dashboard script still not found at $SCRIPT_DST — cannot start"
-fi
-
-header "STEP 5 — ttyd terminal"
-if command -v ttyd &>/dev/null; then
-  if systemctl is-active --quiet ttyd 2>/dev/null; then
-    systemctl restart ttyd && ok "ttyd restarted"
-  else
-    systemctl start ttyd 2>/dev/null && ok "ttyd started" || warn "ttyd failed to start"
-  fi
-else
-  warn "ttyd not installed — Terminal tab won't work"
-fi
-
-header "STEP 6 — Start batabeto"
-if systemctl is-active --quiet skyclaw 2>/dev/null; then
-  warn "Already running — restarting"
-  systemctl restart skyclaw
-  ok "batabeto restarted"
-else
-  systemctl start skyclaw
-  ok "batabeto started"
-fi
-
+header "STEP 5 — Start batabeto"
+systemctl start skyclaw
 sleep 2
-systemctl is-active --quiet skyclaw || err "batabeto failed to start. Check: journalctl -fu skyclaw"
+systemctl is-active --quiet skyclaw && ok "batabeto running" || \
+  err "batabeto failed to start. Check: journalctl -fu skyclaw"
+
+header "STEP 6 — Cron jobs"
+if crontab -l 2>/dev/null | grep -q "backup\.sh"; then
+  ok "Backup cron active"
+else
+  warn "Backup cron not installed — run deploy.sh --init to fix"
+fi
+if crontab -l 2>/dev/null | grep -q "heartbeat"; then
+  ok "Heartbeat cron active"
+else
+  warn "Heartbeat cron not installed — run deploy.sh --init to fix"
+fi
 
 echo ""
 echo -e "${GREEN}${BOLD}batabeto is live!${RESET}"
@@ -115,18 +91,9 @@ echo -e "    /addkey    — add your OpenRouter API key"
 echo -e "    /model     — choose your model"
 echo -e "    /status    — server health snapshot"
 echo ""
-echo -e "  ${BOLD}Dashboard:${RESET}"
-TS_IP=$(tailscale ip -4 2>/dev/null || echo "")
-if [[ -n "$TS_IP" ]]; then
-  TOKEN=$(cat /root/.skyclaw/dashboard-token 2>/dev/null || echo "(starting...)")
-  echo -e "    ${BLUE}http://$TS_IP:8888/dashboard?token=$TOKEN${RESET}"
-else
-  echo -e "    Run 'tailscale up' then the bot will send you the link"
-fi
-echo ""
 echo -e "  ${BOLD}Logs:${RESET}"
-echo -e "    ${BLUE}journalctl -fu skyclaw${RESET}           — bot"
-echo -e "    ${BLUE}journalctl -fu skyclaw-dashboard${RESET} — dashboard"
+echo -e "    ${BLUE}journalctl -fu skyclaw${RESET}   — bot"
+echo -e "    ${BLUE}journalctl -fu opencode${RESET}  — opencode"
 echo ""
 header "Live logs (Ctrl+C to exit)"
 echo ""

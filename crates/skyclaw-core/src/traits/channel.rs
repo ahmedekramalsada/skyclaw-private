@@ -60,6 +60,36 @@ pub trait Channel: Send + Sync {
         self.send_message(msg).await?;
         Ok(String::new())
     }
+
+    /// Send a native Telegram poll.
+    /// question: the poll question text.
+    /// options: list of answer strings (2-10 items).
+    /// is_anonymous: true = anonymous poll, false = visible who voted.
+    /// allows_multiple_answers: true = multiple choice, false = single choice.
+    /// Default no-op — only Telegram implements this.
+    async fn send_poll(
+        &self,
+        _chat_id: &str,
+        _question: &str,
+        _options: &[String],
+        _is_anonymous: bool,
+        _allows_multiple_answers: bool,
+    ) -> Result<String, SkyclawError> {
+        Ok(String::new())
+    }
+
+    /// Pin a message in a chat.
+    /// message_id: the Telegram message ID to pin.
+    /// disable_notification: true = pin silently (no notification).
+    /// Default no-op — only Telegram implements this.
+    async fn pin_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _disable_notification: bool,
+    ) -> Result<(), SkyclawError> {
+        Ok(())
+    }
 }
 
 /// Bi-directional file transfer sub-trait. Every messaging channel should implement this.

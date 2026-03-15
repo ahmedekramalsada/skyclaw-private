@@ -1,12 +1,11 @@
 //! Send message tool — sends a text message to the user during tool execution.
-//! This allows the agent to send intermediate messages (progress updates,
-//! periodic outputs, etc.) without waiting for the final reply.
+//! Supports HTML formatting, reply-to, and inline buttons via BUTTONS: syntax.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use skyclaw_core::types::error::SkyclawError;
-use skyclaw_core::types::message::OutboundMessage;
+use skyclaw_core::types::message::{OutboundMessage, ParseMode};
 use skyclaw_core::{Channel, Tool, ToolContext, ToolDeclarations, ToolInput, ToolOutput};
 
 pub struct SendMessageTool {
@@ -26,10 +25,13 @@ impl Tool for SendMessageTool {
     }
 
     fn description(&self) -> &str {
-        "Send a text message to the user immediately during tool execution. \
-         Use this when you need to send intermediate results, progress updates, \
-         or periodic messages before your final reply. The message is delivered \
-         instantly — you don't have to wait until the end of your response."
+        "Send a message to X immediately during tool execution. \
+         Use for live progress updates, results, and status reports. \
+         Supports HTML formatting (bold, code, pre blocks) and inline buttons. \
+         HTML tags: <b>bold</b>, <i>italic</i>, <code>inline code</code>, \
+         <pre>code block</pre>, <a href=\'url\'>link</a>. \
+         Add inline buttons with a BUTTONS: line at the end of text: \
+         BUTTONS: Option A | Option B | ✏️ Other"
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -38,11 +40,20 @@ impl Tool for SendMessageTool {
             "properties": {
                 "text": {
                     "type": "string",
-                    "description": "The message text to send"
+                    "description": "Message text. Supports HTML tags when format=html."
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["plain", "html"],
+                    "description": "Message format. Use html for bold/code/pre formatting. Default: plain."
+                },
+                "reply_to_message_id": {
+                    "type": "string",
+                    "description": "Telegram message ID to reply to. Makes message appear as a reply."
                 },
                 "chat_id": {
                     "type": "string",
-                    "description": "The chat ID to send to. Omit to send to the current conversation."
+                    "description": "Chat ID to send to. Omit to send to current conversation."
                 }
             },
             "required": ["text"]
@@ -74,11 +85,28 @@ impl Tool for SendMessageTool {
             .and_then(|v| v.as_str())
             .unwrap_or(&ctx.chat_id);
 
+        let parse_mode = match input
+            .arguments
+            .get("format")
+            .and_then(|v| v.as_str())
+        {
+            Some("html") => Some(ParseMode::Html),
+            Some("plain") | None => None,
+            _ => None,
+        };
+
+        let reply_to_message_id = input
+            .arguments
+            .get("reply_to_message_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         let outbound = OutboundMessage {
             chat_id: chat_id.to_string(),
             text: text.to_string(),
             reply_to: None,
-            parse_mode: None,
+            parse_mode,
+            reply_to_message_id,
         };
 
         match self.channel.send_message(outbound).await {

@@ -1,0 +1,21 @@
+[Unit]
+Description=OpenCode AI coding server (port 4096)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.skyclaw
+EnvironmentFile=-/root/.skyclaw/.env
+ExecStart=/usr/bin/opencode serve --port 4096
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=120
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=opencode
+
+[Install]
+WantedBy=multi-user.target

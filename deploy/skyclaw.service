@@ -1,5 +1,4 @@
 # batabeto — Personal DevOps AI Agent
-# Systemd service unit
 #
 # INSTALL:
 #   sudo cp deploy/skyclaw.service /etc/systemd/system/skyclaw.service
@@ -9,60 +8,39 @@
 #
 # LOGS:
 #   sudo journalctl -fu skyclaw
-#
-# STOP:
-#   sudo systemctl stop skyclaw
 
 [Unit]
 Description=batabeto — Personal DevOps AI Agent
 Documentation=https://github.com/nagisanzenin/skyclaw
 After=network-online.target
 Wants=network-online.target
-# If you run a local Ollama or Postgres, add it here:
-# After=network-online.target ollama.service postgresql.service
 
 [Service]
 Type=simple
-
-# Run as root — full host control is the point
 User=root
 Group=root
-
-# Working directory — all relative paths resolve from here
 WorkingDirectory=/root/.skyclaw
 
-# Binary location after `sudo cp target/release/skyclaw /usr/local/bin/`
+# Kill any stale process before starting — prevents 409 Telegram conflicts
+ExecStartPre=/bin/bash -c 'pkill -f "/usr/local/bin/skyclaw" 2>/dev/null || true; sleep 1'
+
 ExecStart=/usr/local/bin/skyclaw start
 
-# Graceful stop — sends SIGTERM, waits 30s, then SIGKILL
 ExecStop=/bin/kill -TERM $MAINPID
 TimeoutStopSec=30
 KillMode=mixed
 
-# Restart policy — always restart, with backoff
 Restart=always
-RestartSec=5
+RestartSec=10
 StartLimitIntervalSec=120
 StartLimitBurst=5
 
-# Environment — load secrets from file (never hardcode in unit)
-# Create this file: /root/.skyclaw/.env
-# Contents:
-#   TELEGRAM_BOT_TOKEN=your-token-here
-#   RUST_LOG=info
 EnvironmentFile=-/root/.skyclaw/.env
-
-# Fallback env vars (overridden by .env if set there)
 Environment=RUST_LOG=info
 Environment=RUST_BACKTRACE=0
-
-# K3s kubeconfig — so kubectl works inside the agent
 Environment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-
-# Raise file descriptor limit — needed for many SSH connections
 LimitNOFILE=65535
 
-# Logging — goes to journald, readable with: journalctl -fu skyclaw
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=batabeto

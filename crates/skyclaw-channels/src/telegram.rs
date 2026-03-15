@@ -472,6 +472,13 @@ impl Channel for TelegramChannel {
             request = request.reply_markup(keyboard);
         }
 
+        // Reply-to support: thread message under an existing message
+        if let Some(ref reply_id_str) = msg.reply_to_message_id {
+            if let Ok(reply_id) = reply_id_str.parse::<i32>() {
+                request = request.reply_to_message_id(teloxide::types::MessageId(reply_id));
+            }
+        }
+
         request
             .await
             .map_err(|e| SkyclawError::Channel(format!("Failed to send Telegram message: {e}")))?;
@@ -592,11 +599,81 @@ impl Channel for TelegramChannel {
             request = request.reply_markup(keyboard);
         }
 
+        // Reply-to support
+        if let Some(ref reply_id_str) = msg.reply_to_message_id {
+            if let Ok(reply_id) = reply_id_str.parse::<i32>() {
+                request = request.reply_to_message_id(teloxide::types::MessageId(reply_id));
+            }
+        }
+
         let sent = request
             .await
             .map_err(|e| SkyclawError::Channel(format!("Failed to send message: {e}")))?;
 
         Ok(sent.id.0.to_string())
+    }
+
+    /// Send a native Telegram poll.
+    async fn send_poll(
+        &self,
+        chat_id: &str,
+        question: &str,
+        options: &[String],
+        is_anonymous: bool,
+        allows_multiple_answers: bool,
+    ) -> Result<String, skyclaw_core::types::error::SkyclawError> {
+        let bot = self
+            .bot
+            .as_ref()
+            .ok_or_else(|| skyclaw_core::types::error::SkyclawError::Channel("Telegram bot not started".into()))?;
+
+        let cid = chat_id
+            .parse::<i64>()
+            .map(teloxide::types::ChatId)
+            .map_err(|_| skyclaw_core::types::error::SkyclawError::Channel(format!("Invalid chat_id: {chat_id}")))?;
+
+        let poll_options: Vec<String> = options.to_vec();
+
+        let mut req = bot.send_poll(cid, question, poll_options);
+        req = req.is_anonymous(is_anonymous);
+        req = req.allows_multiple_answers(allows_multiple_answers);
+
+        let sent = req
+            .await
+            .map_err(|e| skyclaw_core::types::error::SkyclawError::Channel(format!("Failed to send poll: {e}")))?;
+
+        Ok(sent.id.0.to_string())
+    }
+
+    /// Pin a message in the chat.
+    async fn pin_message(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        disable_notification: bool,
+    ) -> Result<(), skyclaw_core::types::error::SkyclawError> {
+        let bot = self
+            .bot
+            .as_ref()
+            .ok_or_else(|| skyclaw_core::types::error::SkyclawError::Channel("Telegram bot not started".into()))?;
+
+        let cid = chat_id
+            .parse::<i64>()
+            .map(teloxide::types::ChatId)
+            .map_err(|_| skyclaw_core::types::error::SkyclawError::Channel(format!("Invalid chat_id: {chat_id}")))?;
+
+        let mid = teloxide::types::MessageId(
+            message_id.parse::<i32>().map_err(|_| {
+                skyclaw_core::types::error::SkyclawError::Channel(format!("Invalid message_id: {message_id}"))
+            })?,
+        );
+
+        bot.pin_chat_message(cid, mid)
+            .disable_notification(disable_notification)
+            .await
+            .map_err(|e| skyclaw_core::types::error::SkyclawError::Channel(format!("Failed to pin message: {e}")))?;
+
+        Ok(())
     }
 }
 
