@@ -591,11 +591,15 @@ html,body{height:100%;overflow:hidden;background:#0d1117;color:#e6edf3;font-fami
 .status-dot{width:9px;height:9px;border-radius:50%;background:#3fb950;flex-shrink:0;transition:background .3s}
 .status-dot.dead{background:#f85149}
 .h-title{font-size:15px;font-weight:600;flex:1}
-.h-btn{background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:6px 11px;border-radius:8px;font-size:13px;cursor:pointer;transition:background .15s}
-.h-btn:active{background:#30363d}
+.h-btn{background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:6px 11px;border-radius:8px;font-size:13px;cursor:pointer;transition:background .15s;-webkit-user-select:none;user-select:none;touch-action:manipulation}
+.h-btn:active{background:#30363d;transform:scale(.95)}
 .h-btn.warn{border-color:#d29922;color:#d29922}
 .h-btn.danger{border-color:#f85149;color:#f85149}
 .h-btn.success{border-color:#3fb950;color:#3fb950}
+.h-btn.busy{opacity:.5;pointer-events:none}
+/* Toast */
+.toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:8px 18px;border-radius:8px;font-size:13px;z-index:100;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
 /* Banner */
 .banner{background:#f85149;color:#fff;text-align:center;padding:7px;font-size:13px;display:none;flex-shrink:0}
 .banner.show{display:block}
@@ -737,28 +741,44 @@ html,body{height:100%;overflow:hidden;background:#0d1117;color:#e6edf3;font-fami
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token')||'';
 const api = p => `${location.origin}${p}?token=${TOKEN}`;
-const wsUrl = `ws://${location.host}/ws?token=${TOKEN}`;
+const wsProto = location.protocol==='https:'?'wss:':'ws:';
+const wsUrl = `${wsProto}//${location.host}/ws?token=${TOKEN}`;
 
 let ws, reconnTimer;
 let feedCount=0, logCount=0;
 let paused=false, currentFile=null;
 
+// ── Toast helper ───────────────────────────────────────────────
+let toastEl;
+function showToast(msg, ms){
+  if(!toastEl){toastEl=document.createElement('div');toastEl.className='toast';document.body.appendChild(toastEl);}
+  toastEl.textContent=msg; toastEl.classList.add('show');
+  clearTimeout(toastEl._t);
+  toastEl._t=setTimeout(()=>toastEl.classList.remove('show'), ms||2500);
+}
+
 // ── WebSocket ──────────────────────────────────────────────────
 function connect(){
-  ws = new WebSocket(wsUrl);
+  if(ws && (ws.readyState===WebSocket.CONNECTING||ws.readyState===WebSocket.OPEN)) return;
+  try{ ws = new WebSocket(wsUrl); } catch(e){ scheduleReconnect(); return; }
   ws.onopen = ()=>{
     document.getElementById('banner').classList.remove('show');
+    // Refresh all panels on reconnect
     loadTree(); loadDiff(); loadLog();
   };
   ws.onclose = ()=>{
     document.getElementById('banner').classList.add('show');
-    clearTimeout(reconnTimer);
-    reconnTimer = setTimeout(connect, 3000);
+    scheduleReconnect();
   };
-  ws.onmessage = e => handle(JSON.parse(e.data));
-  // Keepalive ping
-  setInterval(()=>{ if(ws.readyState===1) ws.send('ping'); }, 25000);
+  ws.onerror = ()=>{}; // onclose will fire after onerror
+  ws.onmessage = e => { try{handle(JSON.parse(e.data));}catch(err){} };
 }
+function scheduleReconnect(){
+  clearTimeout(reconnTimer);
+  reconnTimer = setTimeout(connect, 3000);
+}
+// Single keepalive interval (never duplicated)
+setInterval(()=>{ if(ws && ws.readyState===1) ws.send('ping'); }, 25000);
 
 function handle(m){
   if(m.type==='activity') addActivity(m);
@@ -917,15 +937,31 @@ function renderDiff(diff){
 
 // ── Control ────────────────────────────────────────────────────
 async function ctrl(action){
-  const r=await fetch(api('/api/control'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
-  if(action==='pause'){
-    paused=true;
-    document.getElementById('btn-pause').style.display='none';
-    document.getElementById('btn-resume').style.display='';
-  } else if(action==='resume'){
-    paused=false;
-    document.getElementById('btn-resume').style.display='none';
-    document.getElementById('btn-pause').style.display='';
+  // Visual feedback: disable button briefly
+  const btns=document.querySelectorAll('.h-btn');
+  btns.forEach(b=>b.classList.add('busy'));
+  try{
+    const r=await fetch(api('/api/control'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    if(data.ok){
+      showToast({pause:'⏸ Paused',resume:'▶ Resumed',stop:'⏹ Stop sent',restart:'🔄 Restarting...'}[action]||('✓ '+action));
+    } else {
+      showToast('⚠ '+( data.error||'Unknown error'));
+    }
+    if(action==='pause'){
+      paused=true;
+      document.getElementById('btn-pause').style.display='none';
+      document.getElementById('btn-resume').style.display='';
+    } else if(action==='resume'){
+      paused=false;
+      document.getElementById('btn-resume').style.display='none';
+      document.getElementById('btn-pause').style.display='';
+    }
+  }catch(e){
+    showToast('❌ Failed: '+e.message);
+  }finally{
+    setTimeout(()=>btns.forEach(b=>b.classList.remove('busy')),400);
   }
 }
 
@@ -946,7 +982,11 @@ function switchTab(name){
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-connect();
+// ── Init: load data immediately via REST, then connect WS for live updates ──
+(function init(){
+  loadTree(); loadLog(); loadDiff();
+  connect();
+})();
 </script>
 </body>
 </html>"""

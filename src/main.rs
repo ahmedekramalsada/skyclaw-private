@@ -431,18 +431,36 @@ fn normalize_provider_name(name: &str) -> Option<&'static str> {
 }
 
 /// Default model for each provider.
-fn default_model(provider_name: &str) -> &'static str {
+///
+/// Resolution order:
+/// 1. Environment variable `DEFAULT_MODEL_<PROVIDER>` (e.g. `DEFAULT_MODEL_OPENROUTER`)
+/// 2. Hardcoded fallback
+fn default_model(provider_name: &str) -> String {
+    // Check env var first: DEFAULT_MODEL_OPENROUTER, DEFAULT_MODEL_ANTHROPIC, etc.
+    let env_key = format!(
+        "DEFAULT_MODEL_{}",
+        provider_name.to_uppercase().replace('-', "_")
+    );
+    if let Ok(val) = std::env::var(&env_key) {
+        let val = val.trim().to_string();
+        if !val.is_empty() {
+            return val;
+        }
+    }
+
+    // Hardcoded fallback
     match provider_name {
         "anthropic" => "claude-sonnet-4-6",
         "openai" => "gpt-5.2",
         "openai-codex" => "gpt-5.4",
         "gemini" => "gemini-3-flash-preview",
         "grok" | "xai" => "grok-4-1-fast-non-reasoning",
-        "openrouter" => "anthropic/claude-sonnet-4-6",
+        "openrouter" => "stepfun/step-3.5-flash:free",
         "minimax" => "MiniMax-M2.5",
         "ollama" => "llama3.3",
         _ => "claude-sonnet-4-6",
     }
+    .to_string()
 }
 
 /// Credentials file layout (multi-provider, multi-key).
@@ -1772,10 +1790,22 @@ async fn main() -> Result<()> {
                             .name
                             .clone()
                             .unwrap_or_else(|| "anthropic".to_string());
+                        // Prefer model from credentials.toml (set by /model command),
+                        // then config file, then default_model() as last resort.
                         let model = config
                             .provider
                             .model
                             .clone()
+                            .or_else(|| {
+                                load_credentials_file()
+                                    .and_then(|c| {
+                                        c.providers
+                                            .iter()
+                                            .find(|p| p.name == *c.active.as_str())
+                                            .map(|p| p.model.clone())
+                                    })
+                                    .filter(|m| !m.is_empty())
+                            })
                             .unwrap_or_else(|| default_model(&name).to_string());
                         Some((name, key.clone(), model))
                     } else {
@@ -1803,7 +1833,7 @@ async fn main() -> Result<()> {
                         // Use the configured model if explicitly set in skyclaw.toml,
                         // otherwise use "" to trigger model selection prompt on first message.
                         let bootstrap_model = if pmodel.is_empty()
-                            || pmodel == default_model(pname)
+                            || *pmodel == default_model(pname)
                         {
                             // No explicit model chosen → empty = user picks via Telegram
                             ""
@@ -1931,23 +1961,30 @@ async fn main() -> Result<()> {
                     tracing::warn!(provider = %pname, "Primary API key is a placeholder — starting in onboarding mode");
                     // Fall through to onboarding
                 } else {
-                    // Load all keys and saved base_url for this provider
-                    let (all_keys, saved_base_url) = load_active_provider_keys()
-                        .map(|(_, keys, _, burl)| {
+                    // Load all keys, saved model, and saved base_url for this provider
+                    let (all_keys, saved_model, saved_base_url) = load_active_provider_keys()
+                        .map(|(_, keys, mdl, burl)| {
                             let valid: Vec<String> = keys
                                 .into_iter()
                                 .filter(|k| !is_placeholder_key(k))
                                 .collect();
-                            (valid, burl)
+                            (valid, mdl, burl)
                         })
-                        .unwrap_or_else(|| (vec![key.clone()], None));
+                        .unwrap_or_else(|| (vec![key.clone()], String::new(), None));
+                    // Use saved model from credentials.toml if non-empty,
+                    // otherwise fall back to model from config resolution
+                    let effective_model = if !saved_model.is_empty() {
+                        saved_model
+                    } else {
+                        model.clone()
+                    };
                     let effective_base_url =
                         saved_base_url.or_else(|| config.provider.base_url.clone());
                     let provider_config = skyclaw_core::types::config::ProviderConfig {
                         name: Some(pname.clone()),
                         api_key: Some(key.clone()),
                         keys: all_keys,
-                        model: Some(model.clone()),
+                        model: Some(effective_model.clone()),
                         base_url: effective_base_url,
                         extra_headers: config.provider.extra_headers.clone(),
                     };
@@ -1980,7 +2017,7 @@ async fn main() -> Result<()> {
                             provider.clone(),
                             memory.clone(),
                             tools.clone(),
-                            model.clone(),
+                            effective_model.clone(),
                             system_prompt.clone(),
                             config.agent.max_turns,
                             config.agent.max_context_tokens,
@@ -1991,7 +2028,7 @@ async fn main() -> Result<()> {
                         .with_v2_optimizations(config.agent.v2_optimizations),
                     );
                     *agent_state.write().await = Some(agent);
-                    tracing::info!(provider = %pname, model = %model, "Agent initialized");
+                    tracing::info!(provider = %pname, model = %effective_model, "Agent initialized");
                 }
             } else {
                 // Check if Codex OAuth tokens exist — use those instead of API key
@@ -5548,7 +5585,7 @@ mod tests {
         assert_eq!(default_model("gemini"), "gemini-3-flash-preview");
         assert_eq!(default_model("grok"), "grok-4-1-fast-non-reasoning");
         assert_eq!(default_model("xai"), "grok-4-1-fast-non-reasoning");
-        assert_eq!(default_model("openrouter"), "anthropic/claude-sonnet-4-6");
+        assert_eq!(default_model("openrouter"), "google/gemini-2.0-flash-exp:free");
         assert_eq!(default_model("minimax"), "MiniMax-M2.5");
         assert_eq!(default_model("zai"), "glm-4.7-flash");
         assert_eq!(default_model("ollama"), "llama3.3");
