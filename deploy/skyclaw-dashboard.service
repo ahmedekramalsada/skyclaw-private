@@ -1,0 +1,30 @@
+[Unit]
+Description=batabeto live dashboard
+Documentation=https://github.com/your-repo/skyclaw
+After=network.target skyclaw.service
+Wants=skyclaw.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.skyclaw
+
+# Load the same env file as the bot
+EnvironmentFile=-/root/.skyclaw/.env
+
+# Point these at your actual project directory
+Environment="PROJECT_DIR=/root/skyclaw-private"
+Environment="SKYCLAW_DIR=/root/.skyclaw"
+Environment="SKYCLAW_SERVICE=skyclaw"
+Environment="DASHBOARD_PORT=8888"
+Environment="TTYD_PORT=8889"
+
+ExecStart=/usr/bin/python3 /root/.skyclaw/scripts/skyclaw-dashboard.py
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

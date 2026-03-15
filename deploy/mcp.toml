@@ -53,16 +53,6 @@ transport = "stdio"
 command   = "npx"
 args      = ["-y", "mcp-server-kubernetes"]
 
-# ── Fetch — read any URL ───────────────────────────────────────────────────────
-# Fetches documentation pages, runbooks, Stack Overflow, release notes, APIs.
-# Used for: "check the Helm chart release notes" / "read the K8s docs for X"
-# No API key required.
-[[servers]]
-name      = "fetch"
-transport = "stdio"
-command   = "npx"
-args      = ["-y", "@modelcontextprotocol/server-fetch"]
-
 # ── Sequential Thinking — structured reasoning ────────────────────────────────
 # Breaks complex multi-step problems into a transparent reasoning chain.
 # Used for: incident diagnosis, deployment planning, architecture decisions.

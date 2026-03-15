@@ -243,6 +243,7 @@ impl Channel for TelegramChannel {
                 // move closure consumes tx and the second branch fails to compile.
                 let tx_msg = tx.clone();  // for the text/file message branch
                 let tx_cb  = tx.clone();  // for the callback query (button tap) branch
+                let tx_pa  = tx.clone();  // for poll_answer events
                 let allowlist_msg = allowlist.clone();
                 let admin_msg     = admin.clone();
                 // Callback handler also needs the allowlist to reject unauthorized button taps
@@ -339,9 +340,69 @@ impl Channel for TelegramChannel {
                                 respond(())
                             }
                         }
+                    ))
+                    // ── Poll answer votes ────────────────────────────────
+                    // poll_answer updates have no chat_id — Telegram only sends
+                    // the poll_id, voter, and chosen option indices. We route
+                    // them to OWNER_CHAT_ID so the agent can act on votes.
+                    .branch(Update::filter_poll_answer().endpoint(
+                        move |_bot: Bot, answer: teloxide::types::PollAnswer| {
+                            let tx_poll = tx_pa.clone();
+                            async move {
+                                let owner_chat = std::env::var("OWNER_CHAT_ID").unwrap_or_default();
+                                if owner_chat.is_empty() {
+                                    tracing::debug!("poll_answer received but OWNER_CHAT_ID not set — ignoring");
+                                    return respond(());
+                                }
+                                let voter_id = match &answer.voter {
+                                    teloxide::types::PollAnswerVoter::User(u) => u.id.0.to_string(),
+                                    _ => "unknown".to_string(),
+                                };
+                                let username = match &answer.voter {
+                                    teloxide::types::PollAnswerVoter::User(u) => u.username.clone(),
+                                    _ => None,
+                                };
+                                let options = answer.option_ids.iter()
+                                    .map(|i| i.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                tracing::info!(
+                                    poll_id = %answer.poll_id,
+                                    voter_id = %voter_id,
+                                    options = %options,
+                                    "poll_answer received"
+                                );
+                                let inbound = InboundMessage {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    channel: "telegram".to_string(),
+                                    chat_id: owner_chat,
+                                    user_id: voter_id,
+                                    username,
+                                    text: Some(format!(
+                                        "[Poll vote] poll_id:{} options:[{}]",
+                                        answer.poll_id, options
+                                    )),
+                                    attachments: vec![],
+                                    reply_to: None,
+                                    timestamp: chrono::Utc::now(),
+                                };
+                                if let Err(e) = tx_poll.send(inbound).await {
+                                    tracing::error!(error = %e, "Failed to forward poll_answer to gateway");
+                                }
+                                respond(())
+                            }
+                        }
                     ));
 
-                let mut dispatcher = Dispatcher::builder(bot.clone(), handler).build();
+                // Build dispatcher with explicit allowed_updates so Telegram
+                // delivers poll_answer events (excluded from the default set).
+                let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
+                    .allowed_updates(vec![
+                        teloxide::types::AllowedUpdate::Message,
+                        teloxide::types::AllowedUpdate::CallbackQuery,
+                        teloxide::types::AllowedUpdate::PollAnswer,
+                    ])
+                    .build();
 
                 dispatcher.dispatch().await;
 

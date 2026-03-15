@@ -924,13 +924,19 @@ Always investigate first, include findings in the alert.";
 fn build_system_prompt() -> String {
     let mut prompt = SYSTEM_PROMPT_BASE.to_string();
 
-    // ── Provider/model context ────────────────────────────────
-    prompt.push_str("\n\nACTIVE PROVIDER: OpenRouter\n");
-    prompt.push_str("DEFAULT MODEL: anthropic/claude-sonnet-4-6\n\n");
+    // ── Provider/model context (read live from credentials.toml) ──
+    let (runtime_provider, runtime_model) = load_credentials_file()
+        .and_then(|c| {
+            let p = c.providers.iter().find(|p| p.name == c.active)?.clone();
+            Some((p.name.clone(), if p.model.is_empty() { "not yet selected — owner will pick via /model".to_string() } else { p.model.clone() }))
+        })
+        .unwrap_or_else(|| ("openrouter".to_string(), "not yet selected".to_string()));
+    prompt.push_str(&format!("\n\nACTIVE PROVIDER: {}\n", runtime_provider));
+    prompt.push_str(&format!("ACTIVE MODEL: {}\n\n", runtime_model));
     prompt.push_str("AVAILABLE MODELS VIA OPENROUTER:\n");
-    prompt.push_str("- anthropic/claude-sonnet-4-6 (default — best for DevOps tasks)\n");
-    prompt.push_str("- anthropic/claude-opus-4-6 (most capable — use for complex architecture tasks)\n");
-    prompt.push_str("- anthropic/claude-haiku-4-5 (fastest — use for quick lookups)\n");
+    prompt.push_str("- anthropic/claude-sonnet-4-6 (best for DevOps tasks)\n");
+    prompt.push_str("- anthropic/claude-opus-4-6 (most capable — complex architecture tasks)\n");
+    prompt.push_str("- anthropic/claude-haiku-4-5 (fastest — quick lookups)\n");
     prompt.push_str("- openai/gpt-4o (strong alternative)\n");
     prompt.push_str("- google/gemini-2.5-pro (large context)\n");
     prompt.push_str("Switch model anytime: /model anthropic/claude-opus-4-6\n");
@@ -2555,6 +2561,49 @@ Investigate and remediate.",
 
                                                 if let Some(line) = new_line {
                                                     lines.push(line);
+
+                                                    // ── Write to activity.jsonl for dashboard ──────
+                                                    {
+                                                        let act_path = dirs::home_dir()
+                                                            .unwrap_or_default()
+                                                            .join(".skyclaw")
+                                                            .join("activity.jsonl");
+                                                        let entry = match &phase {
+                                                            AgentTaskPhase::ExecutingTool {
+                                                                tool_name, tool_index,
+                                                                tool_total, detail, ..
+                                                            } => serde_json::json!({
+                                                                "ts":     chrono::Utc::now().timestamp(),
+                                                                "type":   "tool",
+                                                                "tool":   tool_name,
+                                                                "detail": detail.clone().unwrap_or_default(),
+                                                                "index":  tool_index,
+                                                                "total":  tool_total,
+                                                            }),
+                                                            AgentTaskPhase::CallingProvider { round } =>
+                                                                serde_json::json!({
+                                                                    "ts":    chrono::Utc::now().timestamp(),
+                                                                    "type":  "thinking",
+                                                                    "round": round,
+                                                                }),
+                                                            _ => serde_json::Value::Null,
+                                                        };
+                                                        if !entry.is_null() {
+                                                            if let Ok(mut f) = std::fs::OpenOptions::new()
+                                                                .create(true).append(true).open(&act_path)
+                                                            {
+                                                                use std::io::Write as _;
+                                                                let _ = writeln!(f, "{}", entry);
+                                                            }
+                                                            // Rotate at 1 MB
+                                                            if let Ok(m) = std::fs::metadata(&act_path) {
+                                                                if m.len() > 1_000_000 {
+                                                                    let _ = std::fs::write(&act_path, "");
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
                                                     // Keep at most 8 lines to stay within Telegram limits
                                                     if lines.len() > 8 {
                                                         lines.remove(0);
@@ -2980,8 +3029,32 @@ Investigate and remediate.",
                                                     .unwrap_or_else(|_| "error".to_string())
                                             };
 
-                                            // CPU (instant — just read /proc/stat once for a quick estimate)
-                                            let cpu = run("grep 'cpu ' /proc/stat | awk '{idle=$5; total=0; for(i=2;i<=NF;i++) total+=$i; printf \"%.0f\", 100-idle*100/total}'");
+                                            let cpu = {
+                                                let read_idle = |path: &str| -> Option<(u64, u64)> {
+                                                    let s = std::fs::read_to_string(path).ok()?;
+                                                    let line = s.lines().next()?;
+                                                    let fields: Vec<u64> = line.split_whitespace()
+                                                        .skip(1).filter_map(|v| v.parse().ok()).collect();
+                                                    if fields.len() < 4 { return None; }
+                                                    let total: u64 = fields.iter().sum();
+                                                    Some((fields[3], total))
+                                                };
+                                                match read_idle("/proc/stat") {
+                                                    None => "?".to_string(),
+                                                    Some((i1, t1)) => {
+                                                        std::thread::sleep(std::time::Duration::from_millis(200));
+                                                        match read_idle("/proc/stat") {
+                                                            None => "?".to_string(),
+                                                            Some((i2, t2)) => {
+                                                                let dt = t2.saturating_sub(t1);
+                                                                let di = i2.saturating_sub(i1);
+                                                                if dt == 0 { "0".to_string() }
+                                                                else { (100 - (di * 100 / dt)).to_string() }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            };
                                             // Disk
                                             let disk = run("df / | awk 'NR==2{print $5}'");
                                             // Memory
@@ -3557,6 +3630,33 @@ Just type a message to chat with the AI agent.",
                                             return;
                                         }
 
+                                        // ── Dashboard pause check ─────────────────────────────────
+                                        // Dashboard writes ~/.skyclaw/dashboard-pause to pause the bot.
+                                        // We wait here (before starting any new task) until removed.
+                                        {
+                                            let pause_path = dirs::home_dir()
+                                                .unwrap_or_default()
+                                                .join(".skyclaw")
+                                                .join("dashboard-pause");
+                                            if pause_path.exists() {
+                                                tracing::info!("Bot paused by dashboard");
+                                                let pause_reply = skyclaw_core::types::message::OutboundMessage {
+                                                    chat_id:    msg.chat_id.clone(),
+                                                    text:       "⏸ Paused by dashboard. Tap ▶ Resume to continue.".to_string(),
+                                                    reply_to:   Some(msg.id.clone()),
+                                                    parse_mode: None,
+                                                };
+                                                send_with_retry(&*sender, pause_reply).await;
+                                                loop {
+                                                    tokio::time::sleep(
+                                                        std::time::Duration::from_millis(500)
+                                                    ).await;
+                                                    if !pause_path.exists() { break; }
+                                                }
+                                                tracing::info!("Bot resumed by dashboard");
+                                            }
+                                        }
+
                                         // ── Normal mode: process with agent ────
 
                                         // Download attachments
@@ -3734,7 +3834,12 @@ Just type a message to chat with the AI agent.",
                                         // ── Hot-reload: check if credentials changed ────
                                         if let Some((new_name, new_keys, new_model, saved_base_url)) = load_active_provider_keys() {
                                             let current_model = agent.model().to_string();
-                                            if new_model != current_model || new_keys.len() > 1 {
+                                            // Skip hot-reload when model="" — user hasn't selected yet.
+                                            // Without this guard the hot-reload fires immediately
+                                            // ("" != "anthropic/claude-sonnet-4-6"), validation fails on
+                                            // the empty model string, the code treats it as an auth error
+                                            // and writes back the default — silently bypassing /model prompt.
+                                            if !new_model.is_empty() && (new_model != current_model || new_keys.len() > 1) {
                                                 // Filter out placeholder keys before reloading
                                                 let valid_keys: Vec<String> = new_keys.into_iter()
                                                     .filter(|k| !is_placeholder_key(k))
@@ -4083,6 +4188,67 @@ Just type a message to chat with the AI agent.",
                     "  Health: http://{}:{}/health",
                     config.gateway.host, config.gateway.port
                 );
+
+                // ── Dashboard startup notification ─────────────────────────
+                // Resolves Tailscale IP, reads dashboard token, sends link on Telegram.
+                // Runs in background — doesn't block startup.
+                {
+                    let startup_sender = primary_channel.clone();
+                    let startup_chat   = std::env::var("OWNER_CHAT_ID").unwrap_or_default();
+                    let dash_port: u16 = std::env::var("DASHBOARD_PORT")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(8888);
+
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+                        let ts_ip = tokio::process::Command::new("tailscale")
+                            .args(["ip", "-4"])
+                            .output()
+                            .await
+                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                            .unwrap_or_default();
+
+                        if ts_ip.is_empty() {
+                            tracing::info!("Tailscale not running — dashboard link not sent");
+                            return;
+                        }
+
+                        let token_path = dirs::home_dir()
+                            .unwrap_or_default()
+                            .join(".skyclaw")
+                            .join("dashboard-token");
+                        let token = std::fs::read_to_string(&token_path)
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string();
+
+                        if token.is_empty() {
+                            tracing::info!("No dashboard token — start skyclaw-dashboard first");
+                            return;
+                        }
+
+                        let url = format!(
+                            "http://{}:{}/dashboard?token={}",
+                            ts_ip, dash_port, token
+                        );
+
+                        if let (Some(sender), false) = (startup_sender, startup_chat.is_empty()) {
+                            let msg = skyclaw_core::types::message::OutboundMessage {
+                                chat_id:    startup_chat,
+                                text:       format!(
+                                    "🟢 batabeto online\n📊 Dashboard: {}\n\nActivity · Files · Logs · Diff · Terminal",
+                                    url
+                                ),
+                                reply_to:   None,
+                                parse_mode: None,
+                            };
+                            let _ = sender.send_message(msg).await;
+                            tracing::info!(url = %url, "Dashboard link sent to Telegram");
+                        }
+                    });
+                }
             } else {
                 println!("  Status: Onboarding — send your API key via Telegram");
             }

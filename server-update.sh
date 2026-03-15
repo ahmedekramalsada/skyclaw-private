@@ -1,22 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# server-update.sh — Pull + Build + Restart (Big Servers Only)
+# server-update.sh — Pull + Build + Restart (on-server build)
 # Usage: sudo bash server-update.sh
-#
-# For servers that build on-server (>2 GB RAM).
-# Pulls latest code, builds, installs binary, restarts service.
-#
-# For small servers, use deploy.sh from your local PC instead.
 # ─────────────────────────────────────────────────────────────────────────────
-
 set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-RESET='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; BOLD='\033[1m'; RESET='\033[0m'
 
 ok()     { echo -e "${GREEN}✓${RESET} $1"; }
 info()   { echo -e "${BLUE}→${RESET} $1"; }
@@ -24,9 +14,7 @@ warn()   { echo -e "${YELLOW}⚠${RESET}  $1"; }
 err()    { echo -e "${RED}✗${RESET} $1"; exit 1; }
 header() { echo -e "\n${BOLD}$1${RESET}"; echo "────────────────────────────────────────"; }
 
-if [[ $EUID -ne 0 ]]; then
-  err "Run as root: sudo bash server-update.sh"
-fi
+[[ $EUID -ne 0 ]] && err "Run as root: sudo bash server-update.sh"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINARY_PATH="/usr/local/bin/skyclaw"
@@ -37,74 +25,58 @@ echo -e "${BOLD}║       batabeto — Server Update           ║${RESET}"
 echo -e "${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-# ── Step 1 — Pull latest ────────────────────────────────────────────────────
-header "STEP 1 — Pulling latest code"
-
+header "STEP 1 — Pull latest code"
 cd "$REPO_DIR"
 git pull --ff-only || git pull --rebase
 ok "Code updated"
 
-# ── Step 2 — Stop service ───────────────────────────────────────────────────
-header "STEP 2 — Stopping batabeto"
+header "STEP 2 — Stop services"
+systemctl is-active --quiet skyclaw 2>/dev/null && systemctl stop skyclaw && ok "bot stopped" || warn "bot was not running"
+systemctl is-active --quiet skyclaw-dashboard 2>/dev/null && systemctl stop skyclaw-dashboard && ok "dashboard stopped" || true
 
-if systemctl is-active --quiet skyclaw 2>/dev/null; then
-  systemctl stop skyclaw
-  ok "batabeto stopped"
-else
-  warn "batabeto was not running"
-fi
-
-# ── Step 3 — Build ──────────────────────────────────────────────────────────
-header "STEP 3 — Building release binary"
-
-# Ensure linker is available
-if ! command -v cc &>/dev/null; then
-  warn "cc (linker) not found. Checking common locations..."
-  export PATH="$PATH:/usr/bin:/usr/local/bin"
-  if ! command -v cc &>/dev/null; then
-    err "linker 'cc' not found. Try: apt install build-essential"
-  fi
-fi
-
+header "STEP 3 — Build release binary"
+command -v cc &>/dev/null || err "linker 'cc' not found — try: apt install build-essential"
 source "$HOME/.cargo/env" 2>/dev/null || true
 
-info "Building with -j1 (one crate at a time, safe for low RAM)..."
-info "Incremental builds take 5–15 min."
-echo ""
-
-# Ensure we don't use a stale binary
+info "Building (incremental, ~5-15 min)..."
 rm -f target/release/skyclaw
-
-set -o pipefail
 cargo build --release -j1 2>&1 | grep -E "^error|^warning|Compiling |Finished " || true
-
-if [[ ! -f "$REPO_DIR/target/release/skyclaw" ]]; then
-  err "Build failed — binary not found. Try: sudo -E bash server-update.sh"
-fi
+[[ ! -f "$REPO_DIR/target/release/skyclaw" ]] && err "Build failed — see output above"
 ok "Build complete: $(du -sh $REPO_DIR/target/release/skyclaw | cut -f1)"
 
-# ── Step 4 — Install binary ─────────────────────────────────────────────────
-header "STEP 4 — Installing binary"
-
+header "STEP 4 — Install binary"
 cp "$REPO_DIR/target/release/skyclaw" "$BINARY_PATH"
 chmod 755 "$BINARY_PATH"
 ok "Binary installed: $BINARY_PATH"
 
-# ── Step 5 — Restart ────────────────────────────────────────────────────────
-header "STEP 5 — Restarting batabeto"
+header "STEP 5 — Update dashboard script"
+cp "$REPO_DIR/skyclaw-dashboard.py" /root/.skyclaw/scripts/skyclaw-dashboard.py
+chmod +x /root/.skyclaw/scripts/skyclaw-dashboard.py
+ok "Dashboard script updated"
 
+header "STEP 6 — Update MCP config"
+# Only update mcp.toml if it hasn't been customised (check via git)
+if git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -q "deploy/mcp.toml"; then
+  warn "deploy/mcp.toml changed in this update."
+  warn "Your current /root/.skyclaw/mcp.toml was NOT overwritten."
+  warn "Review the changes: git diff HEAD~1 HEAD deploy/mcp.toml"
+  warn "Then manually apply to /root/.skyclaw/mcp.toml if needed."
+fi
+
+header "STEP 7 — Restart services"
 systemctl start skyclaw
 sleep 2
+systemctl is-active --quiet skyclaw && ok "bot running" || err "bot failed to start — check: journalctl -fu skyclaw"
 
-if systemctl is-active --quiet skyclaw; then
-  ok "batabeto is running"
-else
-  err "batabeto failed to start — check: journalctl -fu skyclaw"
-fi
+systemctl start skyclaw-dashboard
+sleep 1
+systemctl is-active --quiet skyclaw-dashboard && ok "dashboard running" || warn "dashboard failed to start — check: journalctl -fu skyclaw-dashboard"
+
+systemctl is-active --quiet ttyd 2>/dev/null && systemctl restart ttyd && ok "ttyd running" || true
 
 echo ""
 echo -e "${GREEN}${BOLD}Update complete. batabeto is live.${RESET}"
 echo ""
-echo -e "  Watch logs:   ${BLUE}journalctl -fu skyclaw${RESET}"
-echo -e "  Check status: ${BLUE}systemctl status skyclaw${RESET}"
+echo -e "  Watch bot logs:       ${BLUE}journalctl -fu skyclaw${RESET}"
+echo -e "  Watch dashboard logs: ${BLUE}journalctl -fu skyclaw-dashboard${RESET}"
 echo ""

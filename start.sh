@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# start.sh — Start batabeto
+# start.sh — Start batabeto + dashboard + terminal
 # Usage: sudo bash start.sh
-#
-# Pre-flight checks → start OpenCode → start/restart skyclaw → tail logs
 # ─────────────────────────────────────────────────────────────────────────────
-
 set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-RESET='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; BOLD='\033[1m'; RESET='\033[0m'
 
 ok()     { echo -e "${GREEN}✓${RESET} $1"; }
 info()   { echo -e "${BLUE}→${RESET} $1"; }
@@ -21,13 +14,10 @@ warn()   { echo -e "${YELLOW}⚠${RESET}  $1"; }
 err()    { echo -e "${RED}✗${RESET} $1"; exit 1; }
 header() { echo -e "\n${BOLD}$1${RESET}"; echo "────────────────────────────────────────"; }
 
-if [[ $EUID -ne 0 ]]; then
-  err "Run as root: sudo bash start.sh"
-fi
+[[ $EUID -ne 0 ]] && err "Run as root: sudo bash start.sh"
 
 ENV_FILE="/root/.skyclaw/.env"
 BINARY="/usr/local/bin/skyclaw"
-SERVICE="skyclaw"
 
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════╗${RESET}"
@@ -35,100 +25,98 @@ echo -e "${BOLD}║       batabeto — Startup                 ║${RESET}"
 echo -e "${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-# ── STEP 1 — Pre-flight checks ──────────────────────────────────────────────
 header "STEP 1 — Pre-flight checks"
-
-if [[ ! -f "$BINARY" ]]; then
-  err "Binary not found at $BINARY — run server-setup.sh first"
-fi
+[[ ! -f "$BINARY" ]] && err "Binary not found at $BINARY — run server-setup.sh or deploy.sh first"
 ok "Binary: $BINARY ($(du -sh $BINARY | cut -f1))"
 
-if ! systemctl list-unit-files | grep -q "^${SERVICE}.service"; then
-  err "Service '${SERVICE}' not found — run server-setup.sh first"
-fi
-ok "Service registered: ${SERVICE}.service"
-
-if [[ ! -f "$ENV_FILE" ]]; then
-  err ".env not found at $ENV_FILE — run server-setup.sh first"
-fi
+[[ ! -f "$ENV_FILE" ]] && err ".env not found at $ENV_FILE — run server-setup.sh first"
 ok ".env found"
 
-# ── STEP 2 — Validate .env ──────────────────────────────────────────────────
-header "STEP 2 — Validating .env"
-
+header "STEP 2 — Validate .env"
 source "$ENV_FILE" 2>/dev/null || true
 
 MISSING=0
-
-if [[ -z "${TELEGRAM_BOT_TOKEN:-}" ]] || [[ "${TELEGRAM_BOT_TOKEN:-}" == "your_telegram_bot_token_here" ]]; then
-  warn "TELEGRAM_BOT_TOKEN is not set"
-  echo "       Get a token from @BotFather, then: nano $ENV_FILE"
-  MISSING=1
+if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || "${TELEGRAM_BOT_TOKEN:-}" == *"your"* ]]; then
+  warn "TELEGRAM_BOT_TOKEN not set"; MISSING=1
 else
-  MASKED="${TELEGRAM_BOT_TOKEN:0:10}...${TELEGRAM_BOT_TOKEN: -4}"
-  ok "TELEGRAM_BOT_TOKEN ($MASKED)"
+  ok "TELEGRAM_BOT_TOKEN (${TELEGRAM_BOT_TOKEN:0:10}...)"
 fi
-
-if [[ -z "${OWNER_CHAT_ID:-}" ]] || [[ "${OWNER_CHAT_ID:-}" == "your_telegram_chat_id_here" ]]; then
-  warn "OWNER_CHAT_ID not set — proactive alerts disabled"
+if [[ -z "${OWNER_CHAT_ID:-}" || "${OWNER_CHAT_ID:-}" == *"your"* ]]; then
+  warn "OWNER_CHAT_ID not set — proactive alerts + dashboard link disabled"
 else
   ok "OWNER_CHAT_ID ($OWNER_CHAT_ID)"
 fi
+[[ $MISSING -eq 1 ]] && err "TELEGRAM_BOT_TOKEN is required. Edit: nano $ENV_FILE"
 
-if [[ $MISSING -eq 1 ]]; then
-  echo ""
-  err "Cannot start — TELEGRAM_BOT_TOKEN is required. Edit: nano $ENV_FILE"
-fi
-
-# ── STEP 3 — OpenCode ───────────────────────────────────────────────────────
-header "STEP 3 — OpenCode server"
-
+header "STEP 3 — OpenCode"
 info "Cleaning stale opencode processes..."
 killall opencode-mcp opencode 2>/dev/null || true
 sleep 1
-
 info "Starting OpenCode on port 4096..."
 opencode serve --port 4096 > /tmp/opencode-startup.log 2>&1 &
 sleep 2
+lsof -i :4096 >/dev/null 2>&1 && ok "OpenCode running on port 4096" || \
+  warn "OpenCode failed to start — coding tasks will use shell fallback"
 
-if ! lsof -i :4096 >/dev/null 2>&1; then
-  err "OpenCode failed to start on port 4096. Check /tmp/opencode-startup.log"
+header "STEP 4 — Dashboard"
+if [[ -f /root/.skyclaw/scripts/skyclaw-dashboard.py ]]; then
+  if systemctl is-active --quiet skyclaw-dashboard 2>/dev/null; then
+    systemctl restart skyclaw-dashboard
+    ok "Dashboard restarted"
+  else
+    systemctl start skyclaw-dashboard 2>/dev/null && ok "Dashboard started" || \
+      warn "Dashboard failed — check: journalctl -fu skyclaw-dashboard"
+  fi
+else
+  warn "Dashboard script not found — run server-setup.sh first"
 fi
-ok "OpenCode running on port 4096"
 
-# ── STEP 4 — Start service ──────────────────────────────────────────────────
-header "STEP 4 — Starting batabeto"
+header "STEP 5 — ttyd terminal"
+if command -v ttyd &>/dev/null; then
+  if systemctl is-active --quiet ttyd 2>/dev/null; then
+    systemctl restart ttyd && ok "ttyd restarted"
+  else
+    systemctl start ttyd 2>/dev/null && ok "ttyd started" || warn "ttyd failed to start"
+  fi
+else
+  warn "ttyd not installed — Terminal tab won't work"
+fi
 
-if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+header "STEP 6 — Start batabeto"
+if systemctl is-active --quiet skyclaw 2>/dev/null; then
   warn "Already running — restarting"
-  systemctl restart "$SERVICE"
+  systemctl restart skyclaw
   ok "batabeto restarted"
 else
-  systemctl start "$SERVICE"
+  systemctl start skyclaw
   ok "batabeto started"
 fi
 
 sleep 2
+systemctl is-active --quiet skyclaw || err "batabeto failed to start. Check: journalctl -fu skyclaw"
 
-if systemctl is-active --quiet "$SERVICE"; then
-  ok "batabeto is running"
-  UPTIME=$(systemctl show "$SERVICE" --property=ActiveEnterTimestamp | cut -d= -f2)
-  info "Started at: $UPTIME"
+echo ""
+echo -e "${GREEN}${BOLD}batabeto is live!${RESET}"
+echo ""
+echo -e "  ${BOLD}Telegram commands:${RESET}"
+echo -e "    /help      — list all commands"
+echo -e "    /addkey    — add your OpenRouter API key"
+echo -e "    /model     — choose your model"
+echo -e "    /status    — server health snapshot"
+echo ""
+echo -e "  ${BOLD}Dashboard:${RESET}"
+TS_IP=$(tailscale ip -4 2>/dev/null || echo "")
+if [[ -n "$TS_IP" ]]; then
+  TOKEN=$(cat /root/.skyclaw/dashboard-token 2>/dev/null || echo "(starting...)")
+  echo -e "    ${BLUE}http://$TS_IP:8888/dashboard?token=$TOKEN${RESET}"
 else
-  err "batabeto failed to start. Check: journalctl -fu $SERVICE"
+  echo -e "    Run 'tailscale up' then the bot will send you the link"
 fi
-
-# ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}${BOLD}batabeto is live. Open Telegram and message your bot.${RESET}"
+echo -e "  ${BOLD}Logs:${RESET}"
+echo -e "    ${BLUE}journalctl -fu skyclaw${RESET}           — bot"
+echo -e "    ${BLUE}journalctl -fu skyclaw-dashboard${RESET} — dashboard"
 echo ""
-echo -e "  First message:  ${BLUE}/help${RESET}"
-echo -e "  Add API key:    ${BLUE}/addkey${RESET}"
-echo -e "  Watch logs:     ${BLUE}journalctl -fu $SERVICE${RESET}"
-echo -e "  Stop:           ${BLUE}systemctl stop $SERVICE${RESET}"
-echo ""
-
-# ── Tail logs ────────────────────────────────────────────────────────────────
 header "Live logs (Ctrl+C to exit)"
 echo ""
-journalctl -fu "$SERVICE" --output=short-iso
+journalctl -fu skyclaw --output=short-iso
