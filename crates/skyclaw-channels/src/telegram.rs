@@ -475,7 +475,9 @@ impl Channel for TelegramChannel {
         // Reply-to support: thread message under an existing message
         if let Some(ref reply_id_str) = msg.reply_to_message_id {
             if let Ok(reply_id) = reply_id_str.parse::<i32>() {
-                request = request.reply_to_message_id(teloxide::types::MessageId(reply_id));
+                request = request.reply_parameters(
+                    teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id))
+                );
             }
         }
 
@@ -602,7 +604,9 @@ impl Channel for TelegramChannel {
         // Reply-to support
         if let Some(ref reply_id_str) = msg.reply_to_message_id {
             if let Ok(reply_id) = reply_id_str.parse::<i32>() {
-                request = request.reply_to_message_id(teloxide::types::MessageId(reply_id));
+                request = request.reply_parameters(
+                    teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id))
+                );
             }
         }
 
@@ -632,7 +636,11 @@ impl Channel for TelegramChannel {
             .map(teloxide::types::ChatId)
             .map_err(|_| skyclaw_core::types::error::SkyclawError::Channel(format!("Invalid chat_id: {chat_id}")))?;
 
-        let poll_options: Vec<String> = options.to_vec();
+        // teloxide-core 0.13 requires InputPollOption, not String
+        let poll_options: Vec<teloxide::types::InputPollOption> = options
+            .iter()
+            .map(|s| teloxide::types::InputPollOption::new(s.clone()))
+            .collect();
 
         let mut req = bot.send_poll(cid, question, poll_options);
         req = req.is_anonymous(is_anonymous);

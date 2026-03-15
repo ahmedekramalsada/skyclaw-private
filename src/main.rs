@@ -782,22 +782,21 @@ Add a BUTTONS: line at the end of any send_message text:\n\
 Buttons pack into rows of 3. Always include ✏️ Other as last option.\n\
 When X taps ✏️ Other, batabeto automatically sends \"✏️ Type your answer:\"\n\n\
 ── REAL TELEGRAM POLLS ──\n\
-Use the send_poll tool when you need X to make a real decision or vote.\n\
-Parameters: question, options (list), is_anonymous, allows_multiple_answers.\n\
-When to use real polls (not buttons):\n\
-  - Choosing between 3+ technical options (e.g. which architecture, which model)\n\
-  - Votes that need to feel \"official\" or permanent\n\
-  - When X might want to share the poll with others\n\
-When to use buttons instead:\n\
-  - Quick yes/no confirmations\n\
-  - Plan approval (Execute / Modify / Cancel)\n\
-  - Any clarifying question with 2-4 options\n\
-Poll answers come back as: [Poll vote] poll_id:X options:[0] — use this to act on the result.\n\n\
+Use send_message with the POLL: prefix to send a native Telegram poll.\n\
+Syntax: POLL: question | option1 | option2 | option3\n\
+Multiple choice: POLL_MULTI: question | option1 | option2 | option3\n\
+Examples:\n\
+  POLL: Which model should I use? | claude-sonnet | gpt-4o | gemini\n\
+  POLL_MULTI: Which tools to install? | docker | kubectl | terraform\n\
+When to use polls vs buttons:\n\
+  - Buttons: quick 2-4 option choices, plan approval, yes/no confirmations\n\
+  - Polls: 3+ technical options, official decisions, \"select all that apply\" choices\n\
+Poll votes arrive as: [Poll vote] poll_id:X options:[0] — index 0 = first option.\n\n\
 ── PIN MESSAGES ──\n\
-Use pin_message(chat_id, message_id, disable_notification) to pin important messages.\n\
-Pin: daily status reports, important deploy results, active project plans.\n\
-Pass disable_notification=true to pin silently (no notification to X).\n\
-Get message_id from send_message_with_id — it returns the Telegram message ID.\n\n\
+Use send_message with PIN: prefix to pin a message silently.\n\
+Syntax: PIN: <message_id>\n\
+Get message_id from send_message_with_id() — it returns the Telegram message ID.\n\
+Pin: daily status reports, deploy results, active project plans.\n\n\
 ── REPLY TO MESSAGE ──\n\
 Pass reply_to_message_id in send_message to thread a reply under a specific message.\n\
 Useful for: replying to X\'s specific question, tying a result to its request.\n\n\

@@ -168,7 +168,7 @@ impl Tool for SendMessageTool {
             // Use pin_message with a sentinel — or for now just note it
             // Most bots don't need unpin; we report it as an info message
             return Ok(ToolOutput {
-                content: format!("Unpin not yet supported via tool (message_id: {}). Use shell: curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/unpinChatMessage" -d chat_id={} -d message_id={}", msg_id, chat_id, msg_id),
+                content: format!("Unpin not yet supported via tool (message_id: {}). Use shell: curl -s https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/unpinChatMessage -d chat_id={} -d message_id={}", msg_id, chat_id, msg_id),
                 is_error: false,
             });
         }
