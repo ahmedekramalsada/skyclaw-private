@@ -22,7 +22,7 @@ Group=root
 WorkingDirectory=/root/.skyclaw
 
 # Kill any stale process before starting — prevents 409 Telegram conflicts
-ExecStartPre=/bin/bash -c 'pkill -f "/usr/local/bin/skyclaw" 2>/dev/null || true; sleep 1'
+ExecStartPre=/bin/bash -c 'pkill -TERM -x skyclaw 2>/dev/null; sleep 1; exit 0'
 
 ExecStart=/usr/local/bin/skyclaw start
 

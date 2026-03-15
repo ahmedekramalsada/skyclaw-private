@@ -60,7 +60,7 @@ else
 fi
 
 header "STEP 4 — Kill any stale bot processes (prevents 409)"
-pkill -f "/usr/local/bin/skyclaw" 2>/dev/null || true
+pkill -TERM -x skyclaw 2>/dev/null || true
 sleep 2
 ok "Stale processes cleared"
 
