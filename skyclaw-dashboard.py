@@ -317,13 +317,29 @@ def check_token(token: str = Query(default="")):
         raise HTTPException(status_code=403, detail="Invalid token")
 
 def safe_path(path: str) -> Optional[Path]:
-    """Return an absolute path only if it's under HOME or SKYCLAW_DIR."""
+    """Return an absolute path only if it's under HOME, SKYCLAW_DIR, or PROJECT_DIR."""
     p = (HOME / path).resolve()
+    
     try:
         p.relative_to(HOME)
         return p
     except ValueError:
-        return None
+        pass
+        
+    try:
+        p.relative_to(SKYCLAW_DIR.resolve())
+        return p
+    except ValueError:
+        pass
+        
+    if PROJECT_DIR.exists():
+        try:
+            p.relative_to(PROJECT_DIR.resolve())
+            return p
+        except ValueError:
+            pass
+
+    return None
 
 def fmt_size(n: int) -> str:
     for unit in ["B", "K", "M", "G"]:
@@ -341,7 +357,10 @@ def build_tree(root: Path, recent_files: set, prefix: str = "") -> list[dict]:
     for entry in entries:
         if entry.name in IGNORE_NAMES or entry.name.startswith(".git"):
             continue
-        rel = str(entry.relative_to(HOME))
+        try:
+            rel = str(entry.relative_to(HOME))
+        except ValueError:
+            rel = str(entry.resolve())
         if entry.is_dir():
             children = build_tree(entry, recent_files, prefix + "  ")
             if children:
