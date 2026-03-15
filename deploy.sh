@@ -130,7 +130,7 @@ DIR_EOF
   done
   ok "Workspace files"
 
-  for skill in devops-core incident-response deployment self-management telegram-features study-and-learning planning-and-projects; do
+  for skill in devops-core incident-response deployment self-management telegram-features study-and-learning planning-and-projects opencode-repair; do
     if [[ -f "$REPO_DIR/skills/$skill.md" ]]; then
       _scp "$REPO_DIR/skills/$skill.md" "$REMOTE_DEST:/tmp/$skill.md"
       _ssh "$REMOTE_DEST" "sudo mv /tmp/$skill.md $REMOTE_DIR/skills/$skill.md"

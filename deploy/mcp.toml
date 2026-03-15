@@ -24,6 +24,7 @@ name      = "opencode"
 transport = "stdio"
 command   = "npx"
 args      = ["-y", "opencode-mcp@latest"]
+env      = { OPENCODE_DEFAULT_PROVIDER = "openrouter", OPENCODE_DEFAULT_MODEL = "stepfun/step-3.5-flash:free" }
 
 # ── GitHub — repos, issues, PRs ──────────────────────────────────────────────
 # Read/write issues, open PRs, search code, view CI status, push commits.
