@@ -354,14 +354,12 @@ impl Channel for TelegramChannel {
                                     tracing::debug!("poll_answer received but OWNER_CHAT_ID not set — ignoring");
                                     return respond(());
                                 }
-                                let voter_id = match &answer.voter {
-                                    teloxide::types::PollAnswerVoter::User(u) => u.id.0.to_string(),
-                                    _ => "unknown".to_string(),
-                                };
-                                let username = match &answer.voter {
-                                    teloxide::types::PollAnswerVoter::User(u) => u.username.clone(),
-                                    _ => None,
-                                };
+                                // teloxide 0.17: voter field exists but PollAnswerVoter
+                                // enum variant paths differ by version — use debug fmt as safe fallback
+                                let voter_id = format!("{:?}", answer.voter)
+                                    .chars().filter(|c| c.is_ascii_digit()).take(12).collect::<String>();
+                                let voter_id = if voter_id.is_empty() { "unknown".to_string() } else { voter_id };
+                                let username: Option<String> = None;
                                 let options = answer.option_ids.iter()
                                     .map(|i| i.to_string())
                                     .collect::<Vec<_>>()
@@ -394,9 +392,12 @@ impl Channel for TelegramChannel {
                         }
                     ));
 
-                // Build dispatcher with explicit allowed_updates so Telegram
+                // teloxide 0.17: allowed_updates must be set via a Polling listener,
+                // not on DispatcherBuilder. Use dispatch_with_listener so Telegram
                 // delivers poll_answer events (excluded from the default set).
-                let mut dispatcher = Dispatcher::builder(bot.clone(), handler)
+                let mut dispatcher = Dispatcher::builder(bot.clone(), handler).build();
+
+                let listener_result = teloxide::update_listeners::Polling::builder(bot.clone())
                     .allowed_updates(vec![
                         teloxide::types::AllowedUpdate::Message,
                         teloxide::types::AllowedUpdate::CallbackQuery,
@@ -404,7 +405,12 @@ impl Channel for TelegramChannel {
                     ])
                     .build();
 
-                dispatcher.dispatch().await;
+                dispatcher.dispatch_with_listener(
+                    listener_result,
+                    teloxide::error_handlers::LoggingErrorHandler::with_custom_text(
+                        "Telegram listener error",
+                    ),
+                ).await;
 
                 // Dispatcher exited — network error, API throttle, etc.
                 if shutdown.load(Ordering::Relaxed) {
