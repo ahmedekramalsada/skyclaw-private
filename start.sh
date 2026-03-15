@@ -59,7 +59,18 @@ lsof -i :4096 >/dev/null 2>&1 && ok "OpenCode running on port 4096" || \
   warn "OpenCode failed to start — coding tasks will use shell fallback"
 
 header "STEP 4 — Dashboard"
-if [[ -f /root/.skyclaw/scripts/skyclaw-dashboard.py ]]; then
+# BUG FIX: always copy the dashboard script from the repo so it's never stale/missing
+SCRIPT_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/skyclaw-dashboard.py"
+SCRIPT_DST="/root/.skyclaw/scripts/skyclaw-dashboard.py"
+mkdir -p /root/.skyclaw/scripts
+if [[ -f "$SCRIPT_SRC" ]]; then
+  cp "$SCRIPT_SRC" "$SCRIPT_DST"
+  chmod +x "$SCRIPT_DST"
+  ok "Dashboard script deployed to $SCRIPT_DST"
+else
+  warn "skyclaw-dashboard.py not found in repo root — using existing script if present"
+fi
+if [[ -f "$SCRIPT_DST" ]]; then
   if systemctl is-active --quiet skyclaw-dashboard 2>/dev/null; then
     systemctl restart skyclaw-dashboard
     ok "Dashboard restarted"
@@ -68,7 +79,7 @@ if [[ -f /root/.skyclaw/scripts/skyclaw-dashboard.py ]]; then
       warn "Dashboard failed — check: journalctl -fu skyclaw-dashboard"
   fi
 else
-  warn "Dashboard script not found — run server-setup.sh first"
+  warn "Dashboard script still not found at $SCRIPT_DST — cannot start"
 fi
 
 header "STEP 5 — ttyd terminal"
