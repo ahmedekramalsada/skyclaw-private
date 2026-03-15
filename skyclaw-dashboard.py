@@ -49,6 +49,7 @@ PAUSE_FILE    = SKYCLAW_DIR / "dashboard-pause"
 IGNORE_NAMES = {
     ".git", "__pycache__", "memory.db", "memory.db-wal",
     "memory.db-shm", "skyclaw.pid", "activity.jsonl",
+    "target", "node_modules", ".pytest_cache"
 }
 IGNORE_EXTS = {".swp", ".tmp", ".pyc"}
 
